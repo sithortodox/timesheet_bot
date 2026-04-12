@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+
+  bot:
+    build: .
+    container_name: timesheet_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MINI_APP_URL=${MINI_APP_URL}
+    volumes:
+      - bot_data:/app/data
+
+  miniapp:
+    image: nginx:alpine
+    container_name: timesheet_miniapp
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./miniapp:/usr/share/nginx/html:ro
+
+volumes:
+  bot_data:

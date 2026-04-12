@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Табель</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --surface: #161616;
+    --surface2: #1f1f1f;
+    --border: #2a2a2a;
+    --accent: #c8ff00;
+    --accent-dim: #8fb300;
+    --text: #f0f0f0;
+    --text-muted: #666;
+    --text-dim: #999;
+    --red: #ff4d4d;
+    --orange: #ff8c00;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'IBM Plex Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+    padding-bottom: 80px;
+  }
+
+  /* ── Header ── */
+  .header {
+    padding: 20px 16px 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .brand {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .month-total {
+    text-align: right;
+  }
+
+  .month-total .hours {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .month-total .label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  /* ── Month nav ── */
+  .month-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .month-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.15s;
+  }
+  .month-btn:active { background: var(--surface2); transform: scale(0.95); }
+
+  .month-label {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    flex: 1;
+    text-align: center;
+  }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px 0;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 500;
+  }
+
+  /* ── Content ── */
+  .content { padding: 12px 16px 0; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Calendar ── */
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
+    margin-top: 8px;
+  }
+
+  .cal-dow {
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 4px 0;
+  }
+
+  .cal-day {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cal-day.empty { background: transparent; border-color: transparent; cursor: default; }
+  .cal-day.today { border-color: var(--accent); }
+  .cal-day.has-entry { background: var(--surface2); }
+  .cal-day.has-entry::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .cal-day.future { opacity: 0.3; cursor: default; }
+  .cal-day:not(.empty):not(.future):active { transform: scale(0.92); }
+
+  .cal-day .day-num {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .cal-day .day-hrs {
+    font-size: 9px;
+    color: var(--accent);
+    line-height: 1;
+    margin-top: 2px;
+  }
+
+  .cal-day.today .day-num { color: var(--accent); font-weight: 800; }
+
+  /* Weekend tint */
+  .cal-day.weekend:not(.has-entry) { background: rgba(255,255,255,0.02); }
+
+  /* ── Entry form ── */
+  .entry-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-top: 12px;
+    animation: slideIn 0.2s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .entry-date {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .form-row {
+    margin-bottom: 12px;
+  }
+
+  .form-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+
+  /* Hours input */
+  .hours-picker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .hours-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .step-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.1s;
+  }
+  .step-btn:active { background: var(--border); }
+
+  .hours-val {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--accent);
+    min-width: 52px;
+    text-align: center;
+  }
+
+  .quick-hours {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .qh-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .qh-btn:active, .qh-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+  }
+
+  .note-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    resize: none;
+    outline: none;
+    transition: border-color 0.15s;
+    min-height: 72px;
+  }
+  .note-input:focus { border-color: var(--accent); }
+  .note-input::placeholder { color: var(--text-muted); }
+
+  .save-btn {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: #000;
+    font-family: 'Unbounded', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.03em;
+  }
+  .save-btn:active { transform: scale(0.98); opacity: 0.9; }
+
+  .delete-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--red);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 10px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: all 0.15s;
+  }
+  .delete-btn:active { background: rgba(255,77,77,0.1); }
+
+  /* ── Log panel ── */
+  .log-list { margin-top: 8px; }
+
+  .log-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .log-item:active { border-color: var(--accent); }
+
+  .log-date {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    white-space: nowrap;
+    min-width: 54px;
+  }
+
+  .log-hrs {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    min-width: 44px;
+  }
+
+  .log-hrs span { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+
+  .log-note {
+    font-size: 12px;
+    color: var(--text-dim);
+    flex: 1;
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+
+  /* ── Stats panel ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+  }
+
+  .stat-card.full { grid-column: span 2; }
+
+  .stat-val {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .week-chart {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    align-items: end;
+    height: 80px;
+  }
+
+  .wc-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    justify-content: flex-end;
+  }
+
+  .wc-bar {
+    width: 100%;
+    background: var(--accent);
+    border-radius: 4px 4px 0 0;
+    opacity: 0.85;
+    min-height: 3px;
+    transition: height 0.4s cubic-bezier(.34,1.56,.64,1);
+  }
+
+  .wc-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .streak-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .streak-icon { font-size: 20px; }
+  .streak-text { font-size: 13px; color: var(--text-dim); }
+  .streak-text strong { color: var(--text); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--accent);
+    color: #000;
+    font-family: 'Unbounded', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 10px 20px;
+    border-radius: 100px;
+    opacity: 0;
+    transition: all 0.25s;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Bottom bar ── */
+  .bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: 12px 16px;
+    background: linear-gradient(to top, var(--bg) 80%, transparent);
+    padding-top: 20px;
+  }
+
+  .today-quick {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .today-quick:active { border-color: var(--accent); }
+  .today-quick .tq-icon { font-size: 18px; }
+  .today-quick .tq-text { flex: 1; font-size: 12px; color: var(--text-dim); }
+  .today-quick .tq-today { font-family: 'Unbounded', sans-serif; font-size: 11px; font-weight: 700; color: var(--accent); }
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="brand">⏱ Табель</div>
+    <div class="month-total">
+      <div class="hours" id="monthTotal">0</div>
+      <div class="label">часов в месяце</div>
+    </div>
+  </div>
+  <div class="month-nav">
+    <button class="month-btn" id="prevMonth">‹</button>
+    <div class="month-label" id="monthLabel">–</div>
+    <button class="month-btn" id="nextMonth">›</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="calendar">Календарь</button>
+  <button class="tab" data-tab="log">Журнал</button>
+  <button class="tab" data-tab="stats">Статистика</button>
+</div>
+
+<div class="content">
+
+  <!-- ── Calendar panel ── -->
+  <div class="panel active" id="panel-calendar">
+    <div class="cal-grid" id="calGrid"></div>
+    <div id="entryForm"></div>
+  </div>
+
+  <!-- ── Log panel ── -->
+  <div class="panel" id="panel-log">
+    <div class="log-list" id="logList"></div>
+  </div>
+
+  <!-- ── Stats panel ── -->
+  <div class="panel" id="panel-stats">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="week-chart" id="weekChart"></div>
+    <div id="streakRow"></div>
+  </div>
+
+</div>
+
+<!-- Quick "add today" button (shown when no form open) -->
+<div class="bottom-bar" id="bottomBar">
+  <div class="today-quick" id="todayQuick">
+    <span class="tq-icon">✏️</span>
+    <span class="tq-text">Записать рабочий день</span>
+    <span class="tq-today" id="todayLabel">–</span>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Telegram WebApp init ────────────────────────────────────────────────────
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.setHeaderColor('#0d0d0d');
+  tg.setBackgroundColor('#0d0d0d');
+}
+
+// ── State ───────────────────────────────────────────────────────────────────
+let currentMonth; // {year, month} 0-indexed
+let entries = {}; // { "2025-04-10": {hours, note, updated_at} }
+let selectedDate = null;
+let currentTab = 'calendar';
+
+const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                   'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const DAYS_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+// ── Storage ─────────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'timesheet_v2_' + (tg?.initDataUnsafe?.user?.id || 'local');
+
+function loadEntries() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    entries = raw ? JSON.parse(raw) : {};
+  } catch { entries = {}; }
+}
+
+function saveEntries() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  } catch {}
+  // Notify bot if in Telegram
+  if (tg?.sendData) {
+    // Bot will receive all entries on close
+  }
+}
+
+function saveEntry(dateStr, hours, note) {
+  entries[dateStr] = { hours, note, updated_at: new Date().toISOString() };
+  saveEntries();
+}
+
+function deleteEntry(dateStr) {
+  delete entries[dateStr];
+  saveEntries();
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function toDateStr(year, month, day) {
+  return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+
+function today() {
+  const d = new Date();
+  return toDateStr(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function monthEntries(year, month) {
+  const prefix = `${year}-${String(month+1).padStart(2,'0')}-`;
+  return Object.entries(entries).filter(([k]) => k.startsWith(prefix));
+}
+
+// ── Calendar render ──────────────────────────────────────────────────────────
+function renderCalendar() {
+  const { year, month } = currentMonth;
+  document.getElementById('monthLabel').textContent =
+    `${MONTHS_RU[month]} ${year}`;
+
+  const me = monthEntries(year, month);
+  const totalHours = me.reduce((s, [,v]) => s + v.hours, 0);
+  document.getElementById('monthTotal').textContent =
+    totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1);
+
+  const grid = document.getElementById('calGrid');
+  grid.innerHTML = '';
+
+  // Day-of-week headers
+  DAYS_RU.forEach(d => {
+    const el = document.createElement('div');
+    el.className = 'cal-dow';
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  // First day of month (Mon=0)
+  const firstDay = new Date(year, month, 1).getDay();
+  const offset = (firstDay + 6) % 7; // Mon-indexed
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const todayStr = today();
+
+  for (let i = 0; i < offset; i++) {
+    const el = document.createElement('div');
+    el.className = 'cal-day empty';
+    grid.appendChild(el);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = toDateStr(year, month, d);
+    const dow = (new Date(year, month, d).getDay() + 6) % 7;
+    const entry = entries[dateStr];
+    const isFuture = dateStr > todayStr;
+    const isToday = dateStr === todayStr;
+    const isWeekend = dow >= 5;
+
+    const el = document.createElement('div');
+    let cls = 'cal-day';
+    if (entry) cls += ' has-entry';
+    if (isToday) cls += ' today';
+    if (isFuture) cls += ' future';
+    if (isWeekend) cls += ' weekend';
+    el.className = cls;
+
+    const num = document.createElement('div');
+    num.className = 'day-num';
+    num.textContent = d;
+    el.appendChild(num);
+
+    if (entry) {
+      const hrs = document.createElement('div');
+      hrs.className = 'day-hrs';
+      hrs.textContent = entry.hours % 1 === 0 ? entry.hours + 'ч' : entry.hours + 'ч';
+      el.appendChild(hrs);
+    }
+
+    if (!isFuture) {
+      el.addEventListener('click', () => openEntry(dateStr));
+    }
+
+    grid.appendChild(el);
+  }
+}
+
+// ── Entry form ───────────────────────────────────────────────────────────────
+let formHours = 8;
+
+function openEntry(dateStr) {
+  selectedDate = dateStr;
+  const existing = entries[dateStr];
+  formHours = existing?.hours ?? 8;
+
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month-1, day);
+  const dayNames = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+  const label = `${dayNames[d.getDay()]}, ${day} ${MONTHS_RU[month-1]}`;
+
+  const form = document.getElementById('entryForm');
+  form.innerHTML = `
+    <div class="entry-form">
+      <div class="entry-date">
+        <span>${label}</span>
+        <button class="close-btn" id="closeForm">×</button>
+      </div>
+
+      <div class="form-row">
+        <div class="form-label">Часов отработано</div>
+        <div class="hours-picker">
+          <div class="hours-stepper">
+            <button class="step-btn" id="stepDown">−</button>
+            <div class="hours-val" id="hoursVal">${formHours}</div>
+            <button class="step-btn" id="stepUp">＋</button>
+          </div>
+          <div class="quick-hours">
+            ${[4,6,7,8,9,10].map(h =>
+              `<button class="qh-btn${h===formHours?' active':''}" data-h="${h}">${h}</button>`
+            ).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-label">Заметка (необязательно)</div>
+        <textarea class="note-input" id="noteInput"
+          placeholder="Что делал сегодня? Задачи, встречи…">${existing?.note ?? ''}</textarea>
+      </div>
+
+      <button class="save-btn" id="saveBtn">СОХРАНИТЬ</button>
+      ${existing ? `<button class="delete-btn" id="delBtn">🗑 Удалить запись</button>` : ''}
+    </div>
+  `;
+
+  document.getElementById('closeForm').onclick = () => {
+    form.innerHTML = '';
+    selectedDate = null;
+  };
+
+  function updateHoursDisplay() {
+    document.getElementById('hoursVal').textContent = formHours;
+    form.querySelectorAll('.qh-btn').forEach(b => {
+      b.classList.toggle('active', Number(b.dataset.h) === formHours);
+    });
+  }
+
+  document.getElementById('stepDown').onclick = () => {
+    formHours = Math.max(0.5, formHours - 0.5);
+    updateHoursDisplay();
+  };
+  document.getElementById('stepUp').onclick = () => {
+    formHours = Math.min(24, formHours + 0.5);
+    updateHoursDisplay();
+  };
+  form.querySelectorAll('.qh-btn').forEach(b => {
+    b.onclick = () => {
+      formHours = Number(b.dataset.h);
+      updateHoursDisplay();
+    };
+  });
+
+  document.getElementById('saveBtn').onclick = () => {
+    const note = document.getElementById('noteInput').value.trim();
+    saveEntry(dateStr, formHours, note);
+    form.innerHTML = '';
+    selectedDate = null;
+    renderAll();
+    showToast('✓ Сохранено!');
+    if (tg) tg.HapticFeedback?.notificationOccurred('success');
+  };
+
+  const delBtn = document.getElementById('delBtn');
+  if (delBtn) {
+    delBtn.onclick = () => {
+      deleteEntry(dateStr);
+      form.innerHTML = '';
+      selectedDate = null;
+      renderAll();
+      showToast('Запись удалена');
+    };
+  }
+
+  // Scroll form into view
+  setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+}
+
+// ── Log panel ────────────────────────────────────────────────────────────────
+function renderLog() {
+  const { year, month } = currentMonth;
+  const me = monthEntries(year, month);
+  me.sort((a,b) => b[0].localeCompare(a[0]));
+
+  const list = document.getElementById('logList');
+  if (!me.length) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="icon">📋</div>
+      Нет записей за ${MONTHS_RU[month]} ${year}
+    </div>`;
+    return;
+  }
+
+  const dayNames = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  list.innerHTML = me.map(([dateStr, entry]) => {
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const dn = dayNames[new Date(y,m-1,d).getDay()];
+    return `<div class="log-item" data-date="${dateStr}">
+      <div>
+        <div class="log-date">${d} ${MONTHS_RU[m-1].slice(0,3)}</div>
+        <div class="log-date" style="color:var(--text-muted)">${dn}</div>
+      </div>
+      <div class="log-hrs">${entry.hours}<span>ч</span></div>
+      <div class="log-note">${entry.note || '<span style="color:var(--text-muted)">–</span>'}</div>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.log-item').forEach(item => {
+    item.onclick = () => {
+      document.querySelector('.tab[data-tab="calendar"]').click();
+      setTimeout(() => openEntry(item.dataset.date), 50);
+    };
+  });
+}
+
+// ── Stats panel ──────────────────────────────────────────────────────────────
+function renderStats() {
+  const { year, month } = currentMonth;
+  const me = monthEntries(year, month);
+  const totalHours = me.reduce((s,[,v]) => s+v.hours, 0);
+  const daysWorked = me.length;
+  const avg = daysWorked ? (totalHours/daysWorked) : 0;
+  const daysInMonth = new Date(year,month+1,0).getDate();
+
+  // Streak
+  let streak = 0;
+  const todayStr = today();
+  let checkDate = new Date();
+  while (true) {
+    const ds = toDateStr(checkDate.getFullYear(), checkDate.getMonth(), checkDate.getDate());
+    if (ds > todayStr) { checkDate.setDate(checkDate.getDate()-1); continue; }
+    if (entries[ds]) { streak++; checkDate.setDate(checkDate.getDate()-1); }
+    else break;
+  }
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-val">${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}</div>
+      <div class="stat-label">Всего часов</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val">${daysWorked}</div>
+      <div class="stat-label">Рабочих дней</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val">${avg ? (avg % 1 === 0 ? avg : avg.toFixed(1)) : '–'}</div>
+      <div class="stat-label">Среднее/день, ч</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val">${daysWorked}/${daysInMonth}</div>
+      <div class="stat-label">Заполнено дней</div>
+    </div>
+  `;
+
+  // Last 7 days chart
+  const days = [];
+  const now = new Date();
+  for (let i=6; i>=0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate()-i);
+    const ds = toDateStr(d.getFullYear(), d.getMonth(), d.getDate());
+    const dn = DAYS_RU[(d.getDay()+6)%7];
+    days.push({ ds, dn, hours: entries[ds]?.hours ?? 0 });
+  }
+  const maxH = Math.max(...days.map(d=>d.hours), 8);
+
+  document.getElementById('weekChart').innerHTML = days.map(d => `
+    <div class="wc-col">
+      <div class="wc-bar" style="height:${(d.hours/maxH*64)||0}px"></div>
+      <div class="wc-label">${d.dn}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('streakRow').innerHTML = `
+    <div class="streak-row">
+      <span class="streak-icon">${streak > 0 ? '🔥' : '💤'}</span>
+      <span class="streak-text">Серия подряд: <strong>${streak} ${streak===1?'день':streak<5?'дня':'дней'}</strong></span>
+    </div>
+  `;
+}
+
+// ── Today quick bar ──────────────────────────────────────────────────────────
+function updateTodayBar() {
+  const t = today();
+  const [,m,d] = t.split('-').map(Number);
+  document.getElementById('todayLabel').textContent =
+    `${d} ${MONTHS_RU[m-1].slice(0,3)}`;
+
+  document.getElementById('todayQuick').onclick = () => {
+    // Switch to calendar tab and open today
+    currentMonth = { year: new Date().getFullYear(), month: new Date().getMonth() };
+    document.querySelector('.tab[data-tab="calendar"]').click();
+    setTimeout(() => openEntry(t), 100);
+  };
+}
+
+// ── Render all ───────────────────────────────────────────────────────────────
+function renderAll() {
+  renderCalendar();
+  if (currentTab === 'log') renderLog();
+  if (currentTab === 'stats') renderStats();
+}
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    currentTab = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + currentTab).classList.add('active');
+    if (currentTab === 'log') renderLog();
+    if (currentTab === 'stats') renderStats();
+    // Close any open form
+    document.getElementById('entryForm').innerHTML = '';
+  });
+});
+
+// ── Month nav ────────────────────────────────────────────────────────────────
+document.getElementById('prevMonth').onclick = () => {
+  let { year, month } = currentMonth;
+  month--;
+  if (month < 0) { month = 11; year--; }
+  currentMonth = { year, month };
+  document.getElementById('entryForm').innerHTML = '';
+  renderAll();
+};
+
+document.getElementById('nextMonth').onclick = () => {
+  const now = new Date();
+  let { year, month } = currentMonth;
+  // Don't go past current month
+  if (year === now.getFullYear() && month === now.getMonth()) return;
+  month++;
+  if (month > 11) { month = 0; year++; }
+  currentMonth = { year, month };
+  document.getElementById('entryForm').innerHTML = '';
+  renderAll();
+};
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+function init() {
+  const now = new Date();
+  currentMonth = { year: now.getFullYear(), month: now.getMonth() };
+  loadEntries();
+  updateTodayBar();
+  renderAll();
+
+  // If Telegram theme available, adapt
+  if (tg?.colorScheme === 'light') {
+    document.documentElement.style.setProperty('--bg', '#f5f5f5');
+    document.documentElement.style.setProperty('--surface', '#ffffff');
+    document.documentElement.style.setProperty('--surface2', '#ebebeb');
+    document.documentElement.style.setProperty('--border', '#ddd');
+    document.documentElement.style.setProperty('--text', '#111');
+    document.documentElement.style.setProperty('--text-muted', '#888');
+    document.documentElement.style.setProperty('--text-dim', '#555');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
