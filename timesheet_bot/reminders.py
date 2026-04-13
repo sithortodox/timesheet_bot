@@ -26,9 +26,9 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     "⏰ *Напоминание!*\n\n"
                     "Ты ещё не записал часы за сегодня.\n"
-                    "Отправь количество часов, например: `8` или `7.5 Работал над проектом`",
-                    parse_mode="Markdown",
+                    "Отправь количество часов, например: `8` или `7.5 Работал над проектом`"
                 ),
+                parse_mode="Markdown",
             )
             storage.mark_reminder_sent(user["user_id"], today)
             logger.info(f"Reminder sent to user {user['user_id']}")
