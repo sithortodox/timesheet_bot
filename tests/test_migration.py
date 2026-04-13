@@ -1,7 +1,5 @@
 import json
-import os
 import sqlite3
-import tempfile
 from migrate_json_to_sqlite import migrate
 
 

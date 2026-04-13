@@ -1,5 +1,3 @@
-import pytest
-from datetime import datetime
 from timesheet_bot.storage import SqliteStorage
 
 

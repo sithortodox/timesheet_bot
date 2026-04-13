@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, time
+from datetime import date, datetime
 
 from telegram.ext import ContextTypes
 

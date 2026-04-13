@@ -80,7 +80,7 @@ def migrate(json_path: str = "timesheet_data.json", db_path: str = "timesheet.db
     conn.commit()
     conn.close()
 
-    print(f"✅ Миграция завершена:")
+    print("✅ Миграция завершена:")
     print(f"   Пользователей: {total_users}")
     print(f"   Записей: {total_entries}")
     print(f"   {json_path} → {db_path}")
