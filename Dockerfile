@@ -5,11 +5,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY timesheet_bot/ timesheet_bot/
 COPY bot.py .
 
-# Данные хранятся в volume
 VOLUME ["/app/data"]
 
-ENV DATA_FILE=/app/data/timesheet_data.json
+ENV DB_PATH=/app/data/timesheet.db
 
 CMD ["python", "bot.py"]
