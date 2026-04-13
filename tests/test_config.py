@@ -24,6 +24,8 @@ class TestConfig:
         monkeypatch.setenv("BOT_TOKEN", "tok")
         monkeypatch.setenv("DB_PATH", "/data/bot.db")
         monkeypatch.setenv("REMINDER_CHECK_INTERVAL", "30")
+        monkeypatch.setenv("SUPER_ADMIN_ID", "42")
         config = Config.from_env()
         assert config.db_path == "/data/bot.db"
         assert config.reminder_check_interval == 30
+        assert config.super_admin_id == 42

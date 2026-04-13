@@ -52,6 +52,33 @@ def make_callback_query(data, user_id=123, chat_id=123):
     return update
 
 
+def make_inline_query(query_text, user_id=123):
+    update = MagicMock()
+    user = MagicMock()
+    user.id = user_id
+
+    iq = MagicMock()
+    iq.query = query_text
+    iq.from_user = user
+    iq.answer = AsyncMock()
+    type(update).inline_query = PropertyMock(return_value=iq)
+
+    return update
+
+
+def make_chosen_result(query_text, user_id=123):
+    update = MagicMock()
+    user = MagicMock()
+    user.id = user_id
+
+    result = MagicMock()
+    result.query = query_text
+    result.from_user = user
+    type(update).chosen_inline_result = PropertyMock(return_value=result)
+
+    return update
+
+
 def make_context():
     context = MagicMock()
     context.user_data = {}

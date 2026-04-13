@@ -17,12 +17,15 @@ def config(tmp_path):
         mini_app_url="https://example.com/miniapp",
         db_path=str(tmp_path / "test.db"),
         reminder_check_interval=60,
+        super_admin_id=0,
     )
 
 
 @pytest.fixture
 def storage(config):
-    return SqliteStorage(config.db_path)
+    s = SqliteStorage(config.db_path)
+    yield s
+    s.close()
 
 
 @pytest.fixture
@@ -74,6 +77,33 @@ def make_callback_query(data, user_id=123, chat_id=123):
     query.message.chat.id = chat_id
     query.message.reply_document = AsyncMock()
     type(update).callback_query = PropertyMock(return_value=query)
+
+    return update
+
+
+def make_inline_query(query_text, user_id=123):
+    update = MagicMock()
+    user = MagicMock()
+    user.id = user_id
+
+    iq = MagicMock()
+    iq.query = query_text
+    iq.from_user = user
+    iq.answer = AsyncMock()
+    type(update).inline_query = PropertyMock(return_value=iq)
+
+    return update
+
+
+def make_chosen_result(query_text, user_id=123):
+    update = MagicMock()
+    user = MagicMock()
+    user.id = user_id
+
+    result = MagicMock()
+    result.query = query_text
+    result.from_user = user
+    type(update).chosen_inline_result = PropertyMock(return_value=result)
 
     return update
 

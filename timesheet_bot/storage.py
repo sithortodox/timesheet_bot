@@ -6,19 +6,34 @@ from datetime import datetime
 class StorageBase(ABC):
     @abstractmethod
     def get_entries(
-        self, user_id: int, date_from: str = None, date_to: str = None, limit: int = None
+        self, user_id: int, date_from: str = None, date_to: str = None,
+        limit: int = None, project: str = None
     ) -> list[dict]: ...
 
     @abstractmethod
     def save_entry(
-        self, user_id: int, date_str: str, hours: float, note: str = ""
+        self, user_id: int, date_str: str, hours: float, note: str = "",
+        project: str = ""
     ) -> dict: ...
 
     @abstractmethod
     def delete_entry(self, user_id: int, date_str: str) -> bool: ...
 
     @abstractmethod
-    def get_month_stats(self, user_id: int, year: int, month: int) -> dict: ...
+    def get_month_stats(
+        self, user_id: int, year: int, month: int, project: str = None
+    ) -> dict: ...
+
+    @abstractmethod
+    def get_week_stats(self, user_id: int, date_from: str, date_to: str) -> dict: ...
+
+    @abstractmethod
+    def get_project_stats(
+        self, user_id: int, year: int, month: int
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    def get_projects(self, user_id: int) -> list[str]: ...
 
     @abstractmethod
     def set_reminder(
@@ -40,6 +55,25 @@ class StorageBase(ABC):
     @abstractmethod
     def is_reminder_sent(self, user_id: int, date_str: str) -> bool: ...
 
+    @abstractmethod
+    def set_admin(self, user_id: int, chat_id: int) -> None: ...
+
+    @abstractmethod
+    def is_admin(self, user_id: int) -> bool: ...
+
+    @abstractmethod
+    def remove_admin(self, user_id: int) -> bool: ...
+
+    @abstractmethod
+    def get_all_admins(self) -> list[dict]: ...
+
+    @abstractmethod
+    def get_team_entries(
+        self, date_from: str, date_to: str, project: str = None
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    def get_team_month_stats(self, year: int, month: int) -> list[dict]: ...
 
     @abstractmethod
     def close(self) -> None: ...
@@ -66,11 +100,14 @@ class SqliteStorage(StorageBase):
                 date TEXT NOT NULL,
                 hours REAL NOT NULL,
                 note TEXT DEFAULT '',
+                project TEXT DEFAULT '',
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, date)
             );
             CREATE INDEX IF NOT EXISTS idx_entries_user_date
                 ON entries(user_id, date);
+            CREATE INDEX IF NOT EXISTS idx_entries_project
+                ON entries(user_id, project);
 
             CREATE TABLE IF NOT EXISTS reminders (
                 user_id INTEGER PRIMARY KEY,
@@ -85,6 +122,11 @@ class SqliteStorage(StorageBase):
                 sent_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, date)
             );
+
+            CREATE TABLE IF NOT EXISTS admins (
+                user_id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL
+            );
         """
         )
         conn.commit()
@@ -95,7 +137,8 @@ class SqliteStorage(StorageBase):
             self._conn = None
 
     def get_entries(
-        self, user_id: int, date_from: str = None, date_to: str = None, limit: int = None
+        self, user_id: int, date_from: str = None, date_to: str = None,
+        limit: int = None, project: str = None
     ) -> list[dict]:
         conn = self._get_conn()
         query = "SELECT * FROM entries WHERE user_id = ?"
@@ -106,6 +149,9 @@ class SqliteStorage(StorageBase):
         if date_to:
             query += " AND date <= ?"
             params.append(date_to)
+        if project:
+            query += " AND project = ?"
+            params.append(project)
         query += " ORDER BY date DESC"
         if limit:
             query += f" LIMIT {int(limit)}"
@@ -113,19 +159,20 @@ class SqliteStorage(StorageBase):
         return [dict(r) for r in rows]
 
     def save_entry(
-        self, user_id: int, date_str: str, hours: float, note: str = ""
+        self, user_id: int, date_str: str, hours: float, note: str = "",
+        project: str = ""
     ) -> dict:
         updated_at = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute(
             """
-            INSERT INTO entries (user_id, date, hours, note, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO entries (user_id, date, hours, note, project, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, date) DO UPDATE SET
                 hours=excluded.hours, note=excluded.note,
-                updated_at=excluded.updated_at
+                project=excluded.project, updated_at=excluded.updated_at
             """,
-            (user_id, date_str, hours, note, updated_at),
+            (user_id, date_str, hours, note, project, updated_at),
         )
         conn.commit()
         return {
@@ -133,6 +180,7 @@ class SqliteStorage(StorageBase):
             "date": date_str,
             "hours": hours,
             "note": note,
+            "project": project,
             "updated_at": updated_at,
         }
 
@@ -145,13 +193,35 @@ class SqliteStorage(StorageBase):
         conn.commit()
         return cursor.rowcount > 0
 
-    def get_month_stats(self, user_id: int, year: int, month: int) -> dict:
+    def get_month_stats(
+        self, user_id: int, year: int, month: int, project: str = None
+    ) -> dict:
         month_prefix = f"{year:04d}-{month:02d}"
         conn = self._get_conn()
+        query = "SELECT date, hours, note, project FROM entries WHERE user_id = ? AND date LIKE ?"
+        params: list = [user_id, f"{month_prefix}%"]
+        if project:
+            query += " AND project = ?"
+            params.append(project)
+        query += " ORDER BY date"
+        rows = conn.execute(query, params).fetchall()
+        entries = [dict(r) for r in rows]
+        total_hours = sum(e["hours"] for e in entries)
+        days_worked = len(entries)
+        avg_hours = total_hours / days_worked if days_worked else 0
+        return {
+            "entries": entries,
+            "total_hours": total_hours,
+            "days_worked": days_worked,
+            "avg_hours": avg_hours,
+        }
+
+    def get_week_stats(self, user_id: int, date_from: str, date_to: str) -> dict:
+        conn = self._get_conn()
         rows = conn.execute(
-            "SELECT date, hours, note FROM entries "
-            "WHERE user_id = ? AND date LIKE ? ORDER BY date",
-            (user_id, f"{month_prefix}%"),
+            "SELECT date, hours, note, project FROM entries "
+            "WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date",
+            (user_id, date_from, date_to),
         ).fetchall()
         entries = [dict(r) for r in rows]
         total_hours = sum(e["hours"] for e in entries)
@@ -163,6 +233,26 @@ class SqliteStorage(StorageBase):
             "days_worked": days_worked,
             "avg_hours": avg_hours,
         }
+
+    def get_project_stats(self, user_id: int, year: int, month: int) -> list[dict]:
+        month_prefix = f"{year:04d}-{month:02d}"
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT project, SUM(hours) as total_hours, COUNT(*) as days "
+            "FROM entries WHERE user_id = ? AND date LIKE ? AND project != '' "
+            "GROUP BY project ORDER BY total_hours DESC",
+            (user_id, f"{month_prefix}%"),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_projects(self, user_id: int) -> list[str]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT DISTINCT project FROM entries WHERE user_id = ? AND project != '' "
+            "ORDER BY project",
+            (user_id,),
+        ).fetchall()
+        return [r["project"] for r in rows]
 
     def set_reminder(
         self, user_id: int, chat_id: int, enabled: bool, reminder_time: str = "19:00"
@@ -227,3 +317,60 @@ class SqliteStorage(StorageBase):
             (user_id, date_str),
         ).fetchone()
         return row is not None
+
+    def set_admin(self, user_id: int, chat_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT OR IGNORE INTO admins (user_id, chat_id) VALUES (?, ?)",
+            (user_id, chat_id),
+        )
+        conn.commit()
+
+    def is_admin(self, user_id: int) -> bool:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM admins WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return row is not None
+
+    def remove_admin(self, user_id: int) -> bool:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM admins WHERE user_id = ?", (user_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_all_admins(self) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute("SELECT * FROM admins").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_team_entries(
+        self, date_from: str, date_to: str, project: str = None
+    ) -> list[dict]:
+        conn = self._get_conn()
+        query = "SELECT e.*, r.chat_id FROM entries e JOIN reminders r ON e.user_id = r.user_id WHERE e.date >= ? AND e.date <= ?"
+        params: list = [date_from, date_to]
+        if project:
+            query += " AND e.project = ?"
+            params.append(project)
+        query += " ORDER BY e.date DESC, e.user_id"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_team_month_stats(self, year: int, month: int) -> list[dict]:
+        month_prefix = f"{year:04d}-{month:02d}"
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT user_id, SUM(hours) as total_hours, COUNT(*) as days_worked,
+                   AVG(hours) as avg_hours
+            FROM entries
+            WHERE date LIKE ?
+            GROUP BY user_id
+            ORDER BY total_hours DESC
+            """,
+            (f"{month_prefix}%",),
+        ).fetchall()
+        return [dict(r) for r in rows]

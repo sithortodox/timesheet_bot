@@ -1,6 +1,14 @@
 import logging
 
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ChosenInlineResultHandler,
+    CommandHandler,
+    InlineQueryHandler,
+    MessageHandler,
+    filters,
+)
 
 from .config import Config
 from .handlers import Handlers
@@ -29,6 +37,12 @@ def create_app(config: Config = None) -> Application:
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler("help", handlers.help_cmd))
     app.add_handler(CommandHandler("stats", handlers.stats))
+    app.add_handler(CommandHandler("week", handlers.week))
+    app.add_handler(CommandHandler("projects", handlers.projects))
+    app.add_handler(CommandHandler("team_stats", handlers.team_stats))
+    app.add_handler(CommandHandler("team_export", handlers.team_export))
+    app.add_handler(InlineQueryHandler(handlers.handle_inline))
+    app.add_handler(ChosenInlineResultHandler(handlers.handle_chosen_inline))
     app.add_handler(
         MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handlers.handle_web_app_data)
     )
