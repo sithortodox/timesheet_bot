@@ -4,3 +4,5 @@ timesheet_data.json
 __pycache__/
 *.pyc
 .pytest_cache/
+certbot/
+*.log

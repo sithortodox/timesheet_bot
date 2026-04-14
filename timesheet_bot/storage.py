@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sqlite3
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -154,7 +156,8 @@ class SqliteStorage(StorageBase):
             params.append(project)
         query += " ORDER BY date DESC"
         if limit:
-            query += f" LIMIT {int(limit)}"
+            query += " LIMIT ?"
+            params.append(int(limit))
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 

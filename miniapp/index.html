@@ -617,9 +617,16 @@ if (tg) {
   tg.setBackgroundColor('#0d0d0d');
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 // ── State ───────────────────────────────────────────────────────────────────
-let currentMonth; // {year, month} 0-indexed
-let entries = {}; // { "2025-04-10": {hours, note, updated_at} }
+let currentMonth;
+let entries = {};
 let selectedDate = null;
 let currentTab = 'calendar';
 
@@ -627,34 +634,87 @@ const MONTHS_RU = ['Январь','Февраль','Март','Апрель','М
                    'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 const DAYS_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
+// ── API ─────────────────────────────────────────────────────────────────────
+const API_BASE = window.location.origin + '/api';
+
+function apiHeaders() {
+  const h = {'Content-Type': 'application/json'};
+  if (tg?.initData) h['X-Telegram-Init-Data'] = tg.initData;
+  return h;
+}
+
+async function apiGetEntries() {
+  if (!tg?.initData) return null;
+  try {
+    const resp = await fetch(`${API_BASE}/entries`, {headers: apiHeaders()});
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch { return null; }
+}
+
+async function apiSaveEntry(dateStr, hours, note, project) {
+  if (!tg?.initData) return false;
+  try {
+    const resp = await fetch(`${API_BASE}/entry`, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || ''})
+    });
+    return resp.ok;
+  } catch { return false; }
+}
+
+async function apiDeleteEntry(dateStr) {
+  if (!tg?.initData) return false;
+  try {
+    const resp = await fetch(`${API_BASE}/entry`, {
+      method: 'DELETE',
+      headers: apiHeaders(),
+      body: JSON.stringify({date: dateStr})
+    });
+    return resp.ok;
+  } catch { return false; }
+}
+
 // ── Storage ─────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'timesheet_v2_' + (tg?.initDataUnsafe?.user?.id || 'local');
 
-function loadEntries() {
+function loadEntriesLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     entries = raw ? JSON.parse(raw) : {};
   } catch { entries = {}; }
 }
 
-function saveEntries() {
+function saveEntriesLocal() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch {}
-  // Notify bot if in Telegram
-  if (tg?.sendData) {
-    // Bot will receive all entries on close
+}
+
+async function loadEntries() {
+  const apiData = await apiGetEntries();
+  if (apiData && Object.keys(apiData).length > 0) {
+    entries = apiData;
+    saveEntriesLocal();
+  } else {
+    loadEntriesLocal();
   }
 }
 
-function saveEntry(dateStr, hours, note) {
-  entries[dateStr] = { hours, note, updated_at: new Date().toISOString() };
-  saveEntries();
+async function saveEntry(dateStr, hours, note, project) {
+  entries[dateStr] = { hours, note: note || '', project: project || '', updated_at: new Date().toISOString() };
+  saveEntriesLocal();
+  await apiSaveEntry(dateStr, hours, note, project);
+  if (tg?.sendData) {
+    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || ''}));
+  }
 }
 
-function deleteEntry(dateStr) {
+async function deleteEntry(dateStr) {
   delete entries[dateStr];
-  saveEntries();
+  saveEntriesLocal();
+  await apiDeleteEntry(dateStr);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -824,9 +884,9 @@ function openEntry(dateStr) {
     };
   });
 
-  document.getElementById('saveBtn').onclick = () => {
+  document.getElementById('saveBtn').onclick = async () => {
     const note = document.getElementById('noteInput').value.trim();
-    saveEntry(dateStr, formHours, note);
+    await saveEntry(dateStr, formHours, note);
     form.innerHTML = '';
     selectedDate = null;
     renderAll();
@@ -836,8 +896,8 @@ function openEntry(dateStr) {
 
   const delBtn = document.getElementById('delBtn');
   if (delBtn) {
-    delBtn.onclick = () => {
-      deleteEntry(dateStr);
+    delBtn.onclick = async () => {
+      await deleteEntry(dateStr);
       form.innerHTML = '';
       selectedDate = null;
       renderAll();
@@ -874,7 +934,7 @@ function renderLog() {
         <div class="log-date" style="color:var(--text-muted)">${dn}</div>
       </div>
       <div class="log-hrs">${entry.hours}<span>ч</span></div>
-      <div class="log-note">${entry.note || '<span style="color:var(--text-muted)">–</span>'}</div>
+      <div class="log-note">${entry.note ? escapeHtml(entry.note) : '<span style="color:var(--text-muted)">–</span>'}</div>
     </div>`;
   }).join('');
 
@@ -1012,14 +1072,13 @@ document.getElementById('nextMonth').onclick = () => {
 };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-function init() {
+async function init() {
   const now = new Date();
   currentMonth = { year: now.getFullYear(), month: now.getMonth() };
-  loadEntries();
+  await loadEntries();
   updateTodayBar();
   renderAll();
 
-  // If Telegram theme available, adapt
   if (tg?.colorScheme === 'light') {
     document.documentElement.style.setProperty('--bg', '#f5f5f5');
     document.documentElement.style.setProperty('--surface', '#ffffff');

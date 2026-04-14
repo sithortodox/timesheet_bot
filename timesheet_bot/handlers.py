@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import csv
 import io
 import logging
-import re
 from calendar import month_name, monthrange as _monthrange
 from datetime import date as date_type, datetime, timedelta
 
@@ -19,17 +20,16 @@ from .keyboards import (
     week_keyboard,
 )
 from .storage import StorageBase
+from .utils import (
+    RateLimiter,
+    format_entry_line,
+    format_stats_header,
+    parse_project,
+)
 
 logger = logging.getLogger(__name__)
 
-
-def _parse_project(text: str) -> tuple[str, str]:
-    m = re.match(r"#(\S+)", text)
-    if m:
-        project = m.group(1)
-        note = text[m.end():].strip()
-        return project, note
-    return "", text
+_rate_limiter = RateLimiter(max_calls=20, period=60)
 
 
 def _week_range(d: date_type) -> tuple[date_type, date_type]:
@@ -39,11 +39,11 @@ def _week_range(d: date_type) -> tuple[date_type, date_type]:
 
 
 class Handlers:
-    def __init__(self, storage: StorageBase, config: Config):
+    def __init__(self, storage: StorageBase, config: Config) -> None:
         self.storage = storage
         self.config = config
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
         self.storage.set_reminder(
             user.id, update.effective_chat.id, enabled=True, reminder_time="19:00"
@@ -61,7 +61,7 @@ class Handlers:
             reply_markup=main_keyboard(self.config.mini_app_url),
         )
 
-    async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "📖 *Как пользоваться:*\n\n"
             "• `8` или `8.5` — записать часы за сегодня\n"
@@ -82,7 +82,7 @@ class Handlers:
             parse_mode="Markdown",
         )
 
-    async def stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         now = datetime.now()
         stats_data = self.storage.get_month_stats(user_id, now.year, now.month)
@@ -91,10 +91,12 @@ class Handlers:
             await update.message.reply_text("📊 В этом месяце записей пока нет.")
             return
 
-        lines = [f"📊 *Статистика за {month_name[now.month]} {now.year}*\n"]
-        lines.append(f"🗓 Рабочих дней: *{stats_data['days_worked']}*")
-        lines.append(f"⏱ Всего часов: *{stats_data['total_hours']:.1f}*")
-        lines.append(f"📈 Среднее в день: *{stats_data['avg_hours']:.1f} ч*\n")
+        lines = format_stats_header(
+            f"📊 *Статистика за {month_name[now.month]} {now.year}*",
+            stats_data["days_worked"],
+            stats_data["total_hours"],
+            stats_data["avg_hours"],
+        )
 
         project_stats = self.storage.get_project_stats(user_id, now.year, now.month)
         if project_stats:
@@ -105,18 +107,16 @@ class Handlers:
 
         lines.append("*Последние записи:*")
         for entry in stats_data["entries"][-5:]:
-            proj = f" #{entry['project']}" if entry.get("project") else ""
-            note = f" — {entry['note']}" if entry.get("note") else ""
-            lines.append(f"• {entry['date']}: {entry['hours']}ч{proj}{note}")
+            lines.append(format_entry_line(entry))
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-    async def week(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def week(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "📆 Выбери неделю:", reply_markup=week_keyboard()
         )
 
-    async def projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         proj_list = self.storage.get_projects(user_id)
         if not proj_list:
@@ -131,9 +131,13 @@ class Handlers:
             reply_markup=project_keyboard(proj_list),
         )
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        text = update.message.text.strip()
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
+        if _rate_limiter.is_limited(user_id):
+            await update.message.reply_text("⏳ Слишком много запросов. Подожди немного.")
+            return
+
+        text = update.message.text.strip()
 
         if context.user_data.get("edit_mode"):
             return await self._handle_edit_input(update, context)
@@ -188,9 +192,9 @@ class Handlers:
                 datetime.strptime(parts[1], "%Y-%m-%d")
                 date_str = parts[1]
                 if len(parts) == 3:
-                    project, note = _parse_project(parts[2])
+                    project, note = parse_project(parts[2])
             except ValueError:
-                project, note = _parse_project(" ".join(parts[1:]))
+                project, note = parse_project(" ".join(parts[1:]))
 
         self.storage.save_entry(user_id, date_str, hours, note, project)
 
@@ -203,11 +207,15 @@ class Handlers:
             parse_mode="Markdown",
         )
 
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
         data = query.data
         user_id = update.effective_user.id
+
+        if _rate_limiter.is_limited(user_id):
+            await query.answer("Слишком много запросов", show_alert=True)
+            return
 
         if data == "cancel":
             await query.edit_message_text("❌ Отменено.")
@@ -258,7 +266,7 @@ class Handlers:
 
     async def handle_web_app_data(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    ) -> None:
         import json
 
         raw = update.message.web_app_data.data
@@ -285,7 +293,7 @@ class Handlers:
         except Exception as e:
             logger.error(f"Web app data error: {e}")
 
-    async def handle_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.inline_query
         user_id = query.from_user.id
         query_text = query.query.strip()
@@ -325,7 +333,7 @@ class Handlers:
         rest = query_text.split(maxsplit=1)
         project, note = "", ""
         if len(rest) > 1:
-            project, note = _parse_project(rest[1])
+            project, note = parse_project(rest[1])
 
         proj_display = f" #{project}" if project else ""
         note_display = f" — {note}" if note else ""
@@ -339,7 +347,7 @@ class Handlers:
         )
         await query.answer([result], cache_time=5)
 
-    async def handle_chosen_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_chosen_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         result = update.chosen_inline_result
         user_id = result.from_user.id
         query_text = result.query.strip()
@@ -356,11 +364,11 @@ class Handlers:
         rest = query_text.split(maxsplit=1)
         project, note = "", ""
         if len(rest) > 1:
-            project, note = _parse_project(rest[1])
+            project, note = parse_project(rest[1])
 
         self.storage.save_entry(user_id, date_str, hours, note, project)
 
-    async def team_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def team_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         if not self.storage.is_admin(user_id):
             await update.message.reply_text("❌ Эта команда только для администраторов.")
@@ -384,7 +392,7 @@ class Handlers:
         lines.append(f"\n⏱ *Итого по команде:* {total:.1f}ч")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-    async def team_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def team_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         if not self.storage.is_admin(user_id):
             await update.message.reply_text("❌ Эта команда только для администраторов.")
@@ -415,7 +423,7 @@ class Handlers:
         csv_bytes.name = f"team_timesheet_{month_prefix}.csv"
         await update.message.reply_document(csv_bytes)
 
-    async def _show_entries_for_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _show_entries_for_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         entries = self.storage.get_entries(update.effective_user.id, limit=10)
         if not entries:
             await update.message.reply_text("✏️ Записей для редактирования нет.")
@@ -425,7 +433,7 @@ class Handlers:
             "✏️ Выбери запись для редактирования:", reply_markup=kb
         )
 
-    async def _show_entries_for_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _show_entries_for_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         entries = self.storage.get_entries(update.effective_user.id, limit=10)
         if not entries:
             await update.message.reply_text("🗑 Записей для удаления нет.")
@@ -435,7 +443,7 @@ class Handlers:
             "🗑 Выбери запись для удаления:", reply_markup=kb
         )
 
-    async def _handle_edit_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _handle_edit_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         date_str = context.user_data.pop("edit_mode")
         user_id = update.effective_user.id
         text = update.message.text.strip()
@@ -455,7 +463,7 @@ class Handlers:
         parts = text.split(maxsplit=1)
         project, note = "", ""
         if len(parts) > 1:
-            project, note = _parse_project(parts[1])
+            project, note = parse_project(parts[1])
         self.storage.save_entry(user_id, date_str, hours, note, project)
 
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
@@ -467,7 +475,7 @@ class Handlers:
             parse_mode="Markdown",
         )
 
-    async def _handle_export(self, query, user_id: int, period: str):
+    async def _handle_export(self, query, user_id: int, period: str) -> None:
         now = datetime.now()
         if period == "current":
             year, month = now.year, now.month
@@ -497,7 +505,7 @@ class Handlers:
         await query.edit_message_text(f"📤 Экспорт за {month_name[month]} {year}:")
         await query.message.reply_document(csv_bytes)
 
-    async def _handle_week(self, query, user_id: int, period: str):
+    async def _handle_week(self, query, user_id: int, period: str) -> None:
         today = date_type.today()
         if period == "current":
             start, end = _week_range(today)
@@ -517,10 +525,12 @@ class Handlers:
             )
             return
 
-        lines = [f"📆 *Неделя {start} — {end}*\n"]
-        lines.append(f"🗓 Рабочих дней: *{week_data['days_worked']}*")
-        lines.append(f"⏱ Всего часов: *{week_data['total_hours']:.1f}*")
-        lines.append(f"📈 Среднее в день: *{week_data['avg_hours']:.1f} ч*\n")
+        lines = format_stats_header(
+            f"📆 *Неделя {start} — {end}*",
+            week_data["days_worked"],
+            week_data["total_hours"],
+            week_data["avg_hours"],
+        )
 
         if prev_data["entries"]:
             diff = week_data["total_hours"] - prev_data["total_hours"]
@@ -529,23 +539,23 @@ class Handlers:
 
         lines.append("\n*Записи:*")
         for entry in week_data["entries"]:
-            proj = f" #{entry['project']}" if entry.get("project") else ""
-            note = f" — {entry['note']}" if entry.get("note") else ""
-            lines.append(f"• {entry['date']}: {entry['hours']}ч{proj}{note}")
+            lines.append(format_entry_line(entry))
 
         await query.edit_message_text("\n".join(lines), parse_mode="Markdown")
 
-    async def _handle_project_stats(self, query, user_id: int, proj: str):
+    async def _handle_project_stats(self, query, user_id: int, proj: str) -> None:
         now = datetime.now()
         stats_data = self.storage.get_month_stats(user_id, now.year, now.month, project=proj)
         if not stats_data["entries"]:
             await query.edit_message_text(f"🏷 По проекту #{proj} записей нет.")
             return
 
-        lines = [f"🏷 *Проект #{proj}* — {month_name[now.month]} {now.year}\n"]
-        lines.append(f"🗓 Дней: *{stats_data['days_worked']}*")
-        lines.append(f"⏱ Часов: *{stats_data['total_hours']:.1f}*")
-        lines.append(f"📈 Среднее: *{stats_data['avg_hours']:.1f} ч/дн*\n")
+        lines = format_stats_header(
+            f"🏷 *Проект #{proj}* — {month_name[now.month]} {now.year}",
+            stats_data["days_worked"],
+            stats_data["total_hours"],
+            stats_data["avg_hours"],
+        )
         lines.append("*Записи:*")
         for entry in stats_data["entries"][-10:]:
             note = f" — {entry['note']}" if entry.get("note") else ""
@@ -553,7 +563,7 @@ class Handlers:
 
         await query.edit_message_text("\n".join(lines), parse_mode="Markdown")
 
-    async def _show_reminder_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _show_reminder_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         reminder = self.storage.get_reminder(user_id)
         enabled = reminder["enabled"] if reminder else False
@@ -570,7 +580,7 @@ class Handlers:
             text, parse_mode="Markdown", reply_markup=reminder_keyboard(enabled)
         )
 
-    async def _handle_reminder_callback(self, query, user_id: int, action: str):
+    async def _handle_reminder_callback(self, query, user_id: int, action: str) -> None:
         chat_id = query.message.chat.id
 
         if action == "toggle":

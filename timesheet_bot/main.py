@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 
 from telegram.ext import (
     Application,
@@ -10,19 +14,32 @@ from telegram.ext import (
     filters,
 )
 
+from aiohttp import web
+
+from .api import WebAppAPI
 from .config import Config
 from .handlers import Handlers
 from .reminders import load_reminders
 from .storage import SqliteStorage
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+LOG_FILE = "/app/data/bot.log"
 
 
-def create_app(config: Config = None) -> Application:
+def _setup_logging() -> None:
+    handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.INFO,
+        handlers=[logging.StreamHandler(), handler],
+    )
+
+
+def create_app(config: Config | None = None) -> Application:
     if config is None:
         config = Config.from_env()
 
@@ -56,11 +73,39 @@ def create_app(config: Config = None) -> Application:
     return app
 
 
-def main():
-    config = Config.from_env()
+async def run_bot_and_api(config: Config) -> None:
     app = create_app(config)
-    logger.info("Bot started...")
-    app.run_polling(drop_pending_updates=True)
+    storage: SqliteStorage = app.bot_data["storage"]
+
+    api = WebAppAPI(storage, config.bot_token)
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+
+    runner = web.AppRunner(api.app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8081)
+    await site.start()
+
+    logger = logging.getLogger(__name__)
+    logger.info("Bot + API started (API on port 8081)")
+
+    try:
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        await runner.cleanup()
+
+
+def main() -> None:
+    _setup_logging()
+    config = Config.from_env()
+    asyncio.run(run_bot_and_api(config))
 
 
 if __name__ == "__main__":
