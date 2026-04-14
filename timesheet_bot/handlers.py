@@ -25,6 +25,7 @@ from .utils import (
     format_entry_line,
     format_stats_header,
     parse_project,
+    parse_shift_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,9 +55,9 @@ class Handlers:
             "📋 *Открой табель* кнопкой ниже — удобный интерфейс для записи часов и заметок.\n"
             "⏱ Или используй быстрые команды прямо здесь.\n\n"
             "_Например:_\n"
-            "`8.5` — часы за сегодня\n"
-            "`8.5 #backend Работал над API` — с проектом\n"
-            "`7 2025-04-10 #design Встречи` — дата + проект + заметка",
+            "`09:00 18:00` — начало и конец смены за сегодня\n"
+            "`09:00 18:00 #backend Работал над API` — с проектом\n"
+            "`09:00 18:00 2025-04-10 #design Встречи` — дата + проект + заметка",
             parse_mode="Markdown",
             reply_markup=main_keyboard(self.config.mini_app_url),
         )
@@ -64,10 +65,11 @@ class Handlers:
     async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "📖 *Как пользоваться:*\n\n"
-            "• `8` или `8.5` — записать часы за сегодня\n"
-            "• `8.5 #backend API-ревью` — часы + проект + заметка\n"
-            "• `7 2025-04-10` — записать за конкретную дату\n"
-            "• `7.5 2025-04-10 #design Прототип` — всё вместе\n\n"
+            "• `09:00 18:00` — записать смену за сегодня\n"
+            "• `09:00 18:00 #backend API-ревью` — с проектом и заметкой\n"
+            "• `09:00 18:00 2025-04-10` — за конкретную дату\n"
+            "• `09:00 18:00 2025-04-10 #design Прототип` — всё вместе\n\n"
+            "Часы рассчитываются автоматически из начала и конца смены.\n\n"
             "📋 *Открыть табель* — полный интерфейс с календарём\n"
             "📊 *Статистика* — итоги за месяц + по проектам\n"
             "📆 *Неделя* — итоги за текущую/прошлую неделю\n"
@@ -121,8 +123,8 @@ class Handlers:
         proj_list = self.storage.get_projects(user_id)
         if not proj_list:
             await update.message.reply_text(
-                "🏷 Проектов пока нет.\n\nИспользуй `#название` при записи часов:\n"
-                "`8 #backend API-ревью`",
+                "🏷 Проектов пока нет.\n\nИспользуй `#название` при записи смены:\n"
+                "`09:00 18:00 #backend API-ревью`",
                 parse_mode="Markdown",
             )
             return
@@ -146,10 +148,10 @@ class Handlers:
             return await self.stats(update, context)
         if text == "❓ Помощь":
             return await self.help_cmd(update, context)
-        if text == "⏱ Записать сегодня":
+        if text == "⏱ Записать смену":
             await update.message.reply_text(
-                "Отправь количество часов (можно с проектом и заметкой):\n"
-                "Например: `8` или `7.5 #backend Работал над API`",
+                "Отправь начало и конец смены (можно с проектом и заметкой):\n"
+                "Например: `09:00 18:00` или `09:00 18:00 #backend Работал над API`",
                 parse_mode="Markdown",
             )
             return
@@ -170,40 +172,41 @@ class Handlers:
         if text == "⏰ Напоминания":
             return await self._show_reminder_settings(update, context)
 
-        parts = text.split(maxsplit=2)
-        if not parts:
+        parts = text.split(maxsplit=3)
+        if len(parts) < 2:
             return
 
-        try:
-            hours = float(parts[0].replace(",", "."))
-        except ValueError:
-            return
-
-        if hours <= 0 or hours > 24:
-            await update.message.reply_text("❌ Укажи часы от 0.5 до 24.")
+        start_time = parts[0]
+        end_time = parts[1]
+        hours = parse_shift_time(start_time, end_time)
+        if hours is None:
             return
 
         date_str = date_type.today().isoformat()
         note = ""
         project = ""
 
-        if len(parts) >= 2:
+        rest_parts = parts[2:] if len(parts) > 2 else []
+        if rest_parts:
+            rest = " ".join(rest_parts)
             try:
-                datetime.strptime(parts[1], "%Y-%m-%d")
-                date_str = parts[1]
-                if len(parts) == 3:
-                    project, note = parse_project(parts[2])
+                candidate = rest.split()[0]
+                datetime.strptime(candidate, "%Y-%m-%d")
+                date_str = candidate
+                remaining = rest.split(maxsplit=1)
+                if len(remaining) > 1:
+                    project, note = parse_project(remaining[1])
             except ValueError:
-                project, note = parse_project(" ".join(parts[1:]))
+                project, note = parse_project(rest)
 
-        self.storage.save_entry(user_id, date_str, hours, note, project)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
 
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
         note_text = f"\n📝 Заметка: _{note}_" if note else ""
         await update.message.reply_text(
             f"✅ Записано!\n"
             f"📅 Дата: *{date_str}*\n"
-            f"⏱ Часов: *{hours}*{proj_text}{note_text}",
+            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{proj_text}{note_text}",
             parse_mode="Markdown",
         )
 
@@ -226,8 +229,8 @@ class Handlers:
             context.user_data["edit_mode"] = date_str
             await query.edit_message_text(
                 f"✏️ Редактирование записи за *{date_str}*.\n\n"
-                "Отправь новые часы (можно с проектом и заметкой):\n"
-                "Например: `7.5 #backend Обновлённая заметка`",
+                "Отправь новые начало и конец смены:\n"
+                "Например: `09:00 18:00 #backend Обновлённая заметка`",
                 parse_mode="Markdown",
             )
             return
@@ -277,13 +280,16 @@ class Handlers:
 
             if action == "save_entry":
                 date_str = payload["date"]
-                hours = float(payload["hours"])
+                start_time = payload.get("start_time", "")
+                end_time = payload.get("end_time", "")
+                hours = parse_shift_time(start_time, end_time) if start_time and end_time else float(payload.get("hours", 0))
                 note = payload.get("note", "")
                 project = payload.get("project", "")
-                self.storage.save_entry(user_id, date_str, hours, note, project)
+                self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
+                shift = f" ({start_time}-{end_time})" if start_time and end_time else ""
                 proj = f" #{project}" if project else ""
                 await update.message.reply_text(
-                    f"✅ Сохранено из табеля!\n📅 {date_str} — {hours}ч{proj}",
+                    f"✅ Сохранено из табеля!\n📅 {date_str} — {hours:.1f}ч{shift}{proj}",
                 )
             elif action == "get_data":
                 entries = self.storage.get_entries(user_id)
@@ -306,43 +312,45 @@ class Handlers:
             for entry in entries:
                 proj = f" #{entry['project']}" if entry.get("project") else ""
                 note = f" — {entry['note']}" if entry.get("note") else ""
+                shift = f" {entry.get('start_time', '')}-{entry.get('end_time', '')}" if entry.get("start_time") else ""
                 results.append(
                     InlineQueryResultArticle(
                         id=f"entry:{entry['date']}",
-                        title=f"{entry['date']}: {entry['hours']}ч{proj}",
+                        title=f"{entry['date']}: {entry['hours']}ч{shift}{proj}",
                         description=entry.get("note", "Без заметки"),
                         input_message_content=InputTextMessageContent(
-                            f"📋 {entry['date']}: {entry['hours']}ч{proj}{note}"
+                            f"📋 {entry['date']}: {entry['hours']}ч{shift}{proj}{note}"
                         ),
                     )
                 )
             await query.answer(results, cache_time=10)
             return
 
-        try:
-            hours = float(query_text.replace(",", ".").split()[0])
-        except (ValueError, IndexError):
-            await query.answer([], cache_time=5)
-            return
+        parts = query_text.split()
+        start_time, end_time = "", ""
+        hours = None
+        if len(parts) >= 2:
+            hours = parse_shift_time(parts[0], parts[1])
+            if hours is not None:
+                start_time = parts[0]
+                end_time = parts[1]
 
-        if hours <= 0 or hours > 24:
+        if hours is None:
             await query.answer([], cache_time=5)
             return
 
         date_str = date_type.today().isoformat()
-        rest = query_text.split(maxsplit=1)
         project, note = "", ""
-        if len(rest) > 1:
-            project, note = parse_project(rest[1])
+        if len(parts) > 2:
+            project, note = parse_project(" ".join(parts[2:]))
 
         proj_display = f" #{project}" if project else ""
-        note_display = f" — {note}" if note else ""
         result = InlineQueryResultArticle(
             id="quick_entry",
-            title=f"Записать {hours}ч{proj_display}",
-            description=f"{date_str}{note_display}",
+            title=f"Записать {start_time}-{end_time} ({hours:.1f}ч){proj_display}",
+            description=f"{date_str}",
             input_message_content=InputTextMessageContent(
-                f"✅ Записано {hours}ч{proj_display} за {date_str}"
+                f"✅ Записана смена {start_time}-{end_time} ({hours:.1f}ч){proj_display} за {date_str}"
             ),
         )
         await query.answer([result], cache_time=5)
@@ -352,21 +360,24 @@ class Handlers:
         user_id = result.from_user.id
         query_text = result.query.strip()
 
-        try:
-            hours = float(query_text.replace(",", ".").split()[0])
-        except (ValueError, IndexError):
-            return
+        parts = query_text.split()
+        start_time, end_time = "", ""
+        hours = None
+        if len(parts) >= 2:
+            hours = parse_shift_time(parts[0], parts[1])
+            if hours is not None:
+                start_time = parts[0]
+                end_time = parts[1]
 
-        if hours <= 0 or hours > 24:
+        if hours is None:
             return
 
         date_str = date_type.today().isoformat()
-        rest = query_text.split(maxsplit=1)
         project, note = "", ""
-        if len(rest) > 1:
-            project, note = parse_project(rest[1])
+        if len(parts) > 2:
+            project, note = parse_project(" ".join(parts[2:]))
 
-        self.storage.save_entry(user_id, date_str, hours, note, project)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
 
     async def team_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
@@ -412,10 +423,12 @@ class Handlers:
 
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["Пользователь", "Дата", "Часы", "Проект", "Заметка", "Обновлено"])
+        writer.writerow(["Пользователь", "Дата", "Начало", "Конец", "Часы", "Проект", "Заметка", "Обновлено"])
         for entry in entries:
             writer.writerow([
-                entry["user_id"], entry["date"], entry["hours"],
+                entry["user_id"], entry["date"],
+                entry.get("start_time", ""), entry.get("end_time", ""),
+                entry["hours"],
                 entry.get("project", ""), entry.get("note", ""), entry.get("updated_at", "")
             ])
 
@@ -448,30 +461,31 @@ class Handlers:
         user_id = update.effective_user.id
         text = update.message.text.strip()
 
-        try:
-            hours = float(text.replace(",", ".").split(maxsplit=1)[0])
-        except ValueError:
+        parts = text.split(maxsplit=2)
+        if len(parts) < 2:
             context.user_data["edit_mode"] = date_str
-            await update.message.reply_text("❌ Отправь число (часы).")
+            await update.message.reply_text("❌ Укажи начало и конец смены: `09:00 18:00`", parse_mode="Markdown")
             return
 
-        if hours <= 0 or hours > 24:
+        start_time = parts[0]
+        end_time = parts[1]
+        hours = parse_shift_time(start_time, end_time)
+        if hours is None:
             context.user_data["edit_mode"] = date_str
-            await update.message.reply_text("❌ Укажи часы от 0.5 до 24.")
+            await update.message.reply_text("❌ Неверный формат времени. Пример: `09:00 18:00`", parse_mode="Markdown")
             return
 
-        parts = text.split(maxsplit=1)
         project, note = "", ""
-        if len(parts) > 1:
-            project, note = parse_project(parts[1])
-        self.storage.save_entry(user_id, date_str, hours, note, project)
+        if len(parts) > 2:
+            project, note = parse_project(parts[2])
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
 
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
         note_text = f"\n📝 Заметка: _{note}_" if note else ""
         await update.message.reply_text(
             f"✅ Запись обновлена!\n"
             f"📅 Дата: *{date_str}*\n"
-            f"⏱ Часов: *{hours}*{proj_text}{note_text}",
+            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{proj_text}{note_text}",
             parse_mode="Markdown",
         )
 
@@ -492,10 +506,12 @@ class Handlers:
 
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["Дата", "Часы", "Проект", "Заметка", "Обновлено"])
+        writer.writerow(["Дата", "Начало", "Конец", "Часы", "Проект", "Заметка", "Обновлено"])
         for entry in stats_data["entries"]:
             writer.writerow([
-                entry["date"], entry["hours"], entry.get("project", ""),
+                entry["date"],
+                entry.get("start_time", ""), entry.get("end_time", ""),
+                entry["hours"], entry.get("project", ""),
                 entry.get("note", ""), entry.get("updated_at", "")
             ])
 
@@ -558,8 +574,7 @@ class Handlers:
         )
         lines.append("*Записи:*")
         for entry in stats_data["entries"][-10:]:
-            note = f" — {entry['note']}" if entry.get("note") else ""
-            lines.append(f"• {entry['date']}: {entry['hours']}ч{note}")
+            lines.append(format_entry_line(entry))
 
         await query.edit_message_text("\n".join(lines), parse_mode="Markdown")
 
@@ -574,7 +589,7 @@ class Handlers:
             f"⏰ *Напоминания*\n\n"
             f"Статус: {status}\n"
             f"Время: *{r_time}*\n\n"
-            f"Бот напомнит записать часы, если ты ещё не внёс запись за день."
+            f"Бот напомнит записать смену, если ты ещё не внёс запись за день."
         )
         await update.message.reply_text(
             text, parse_mode="Markdown", reply_markup=reminder_keyboard(enabled)

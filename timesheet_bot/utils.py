@@ -5,6 +5,29 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 
+_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+
+
+def parse_shift_time(start_str: str, end_str: str) -> float | None:
+    m1 = _TIME_RE.match(start_str.strip())
+    m2 = _TIME_RE.match(end_str.strip())
+    if not m1 or not m2:
+        return None
+    sh, sm = int(m1.group(1)), int(m1.group(2))
+    eh, em = int(m2.group(1)), int(m2.group(2))
+    if not (0 <= sh <= 23 and 0 <= sm <= 59 and 0 <= eh <= 23 and 0 <= em <= 59):
+        return None
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
+    diff = end_min - start_min
+    if diff <= 0:
+        return None
+    hours = diff / 60
+    if hours > 24:
+        return None
+    return hours
+
+
 def parse_project(text: str) -> tuple[str, str]:
     m = re.match(r"#(\S+)", text)
     if m:
@@ -17,7 +40,10 @@ def parse_project(text: str) -> tuple[str, str]:
 def format_entry_line(entry: dict) -> str:
     proj = f" #{entry['project']}" if entry.get("project") else ""
     note = f" — {entry['note']}" if entry.get("note") else ""
-    return f"• {entry['date']}: {entry['hours']}ч{proj}{note}"
+    shift = ""
+    if entry.get("start_time") and entry.get("end_time"):
+        shift = f" {entry['start_time']}-{entry['end_time']}"
+    return f"• {entry['date']}: {entry['hours']}ч{shift}{proj}{note}"
 
 
 def format_stats_header(title: str, days_worked: int, total_hours: float, avg_hours: float) -> list[str]:

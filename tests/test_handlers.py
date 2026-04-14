@@ -19,7 +19,7 @@ class TestStartHandler:
         await handlers.start(update, context)
         text = update.message.reply_text.call_args[0][0]
         assert "Иван" in text
-        assert "#backend" in text
+        assert "09:00" in text
 
     @pytest.mark.asyncio
     async def test_start_creates_reminder(self, handlers, storage):
@@ -37,7 +37,7 @@ class TestHelpHandler:
         await handlers.help_cmd(update, context)
         text = update.message.reply_text.call_args[0][0]
         assert "Как пользоваться" in text
-        assert "#backend" in text
+        assert "09:00" in text
         assert "Неделя" in text
         assert "team" in text
 
@@ -53,8 +53,8 @@ class TestStatsHandler:
 
     @pytest.mark.asyncio
     async def test_stats_with_projects(self, handlers, storage):
-        storage.save_entry(123, "2025-04-01", 8.0, "", "backend")
-        storage.save_entry(123, "2025-04-02", 7.5, "", "design")
+        storage.save_entry(123, "2025-04-01", 8.0, "", "backend", "09:00", "18:00")
+        storage.save_entry(123, "2025-04-02", 7.5, "", "design", "09:00", "16:30")
         storage.save_entry(123, "2025-04-03", 8.0, "")
         update = make_update(text="📊 Статистика", user_id=123)
         context = make_context()
@@ -71,19 +71,21 @@ class TestStatsHandler:
 
 class TestHandleMessageQuickEntry:
     @pytest.mark.asyncio
-    async def test_hours_only(self, handlers, storage):
-        update = make_update(text="8", user_id=123)
+    async def test_shift_only(self, handlers, storage):
+        update = make_update(text="09:00 18:00", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
         text = update.message.reply_text.call_args[0][0]
         assert "Записано" in text
         today = date.today().isoformat()
         entries = storage.get_entries(123, date_from=today, date_to=today)
-        assert entries[0]["hours"] == 8.0
+        assert entries[0]["hours"] == 9.0
+        assert entries[0]["start_time"] == "09:00"
+        assert entries[0]["end_time"] == "18:00"
 
     @pytest.mark.asyncio
-    async def test_hours_with_project(self, handlers, storage):
-        update = make_update(text="8.5 #backend API ревью", user_id=123)
+    async def test_shift_with_project(self, handlers, storage):
+        update = make_update(text="09:00 18:00 #backend API ревью", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
         text = update.message.reply_text.call_args[0][0]
@@ -94,27 +96,29 @@ class TestHandleMessageQuickEntry:
         assert entries[0]["note"] == "API ревью"
 
     @pytest.mark.asyncio
-    async def test_hours_with_project_only(self, handlers, storage):
-        update = make_update(text="8 #design", user_id=123)
+    async def test_shift_with_project_only(self, handlers, storage):
+        update = make_update(text="09:00 17:00 #design", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
         today = date.today().isoformat()
         entries = storage.get_entries(123, date_from=today, date_to=today)
         assert entries[0]["project"] == "design"
         assert entries[0]["note"] == ""
+        assert entries[0]["hours"] == 8.0
 
     @pytest.mark.asyncio
-    async def test_hours_with_date_and_project(self, handlers, storage):
-        update = make_update(text="7 2025-04-10 #backend Спринт", user_id=123)
+    async def test_shift_with_date_and_project(self, handlers, storage):
+        update = make_update(text="09:00 18:00 2025-04-10 #backend Спринт", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
         entries = storage.get_entries(123, date_from="2025-04-10", date_to="2025-04-10")
         assert entries[0]["project"] == "backend"
         assert entries[0]["note"] == "Спринт"
+        assert entries[0]["start_time"] == "09:00"
 
     @pytest.mark.asyncio
-    async def test_hours_with_note(self, handlers, storage):
-        update = make_update(text="8.5 Работал над проектом X", user_id=123)
+    async def test_shift_with_note(self, handlers, storage):
+        update = make_update(text="09:00 18:00 Работал над проектом X", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
         today = date.today().isoformat()
@@ -130,11 +134,26 @@ class TestHandleMessageQuickEntry:
         update.message.reply_text.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_zero_hours_rejected(self, handlers):
-        update = make_update(text="0", user_id=123)
+    async def test_invalid_time_ignored(self, handlers):
+        update = make_update(text="25:00 26:00", user_id=123)
         context = make_context()
         await handlers.handle_message(update, context)
-        assert "❌" in update.message.reply_text.call_args[0][0]
+        update.message.reply_text.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_end_before_start_ignored(self, handlers):
+        update = make_update(text="18:00 09:00", user_id=123)
+        context = make_context()
+        await handlers.handle_message(update, context)
+        update.message.reply_text.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_record_shift_button(self, handlers):
+        update = make_update(text="⏱ Записать смену", user_id=123)
+        context = make_context()
+        await handlers.handle_message(update, context)
+        text = update.message.reply_text.call_args[0][0]
+        assert "09:00" in text
 
 
 class TestHandleMessageMenuButtons:
@@ -241,22 +260,24 @@ class TestEditFlow:
         storage.save_entry(123, "2025-04-10", 8.0, "Старая")
         context = make_context()
         context.user_data["edit_mode"] = "2025-04-10"
-        update = make_update(text="6 #backend Новая", user_id=123)
+        update = make_update(text="09:00 18:00 #backend Новая", user_id=123)
         await handlers.handle_message(update, context)
         entries = storage.get_entries(123, date_from="2025-04-10", date_to="2025-04-10")
         assert entries[0]["project"] == "backend"
         assert entries[0]["note"] == "Новая"
+        assert entries[0]["start_time"] == "09:00"
 
 
 class TestWebAppData:
     @pytest.mark.asyncio
     async def test_save_with_project(self, handlers, storage):
-        payload = json.dumps({"action": "save_entry", "date": "2025-04-10", "hours": 8, "note": "API", "project": "backend"})
+        payload = json.dumps({"action": "save_entry", "date": "2025-04-10", "start_time": "09:00", "end_time": "18:00", "note": "API", "project": "backend"})
         update = make_update(user_id=123, web_app_data=payload)
         context = make_context()
         await handlers.handle_web_app_data(update, context)
         entries = storage.get_entries(123)
         assert entries[0]["project"] == "backend"
+        assert entries[0]["start_time"] == "09:00"
 
     @pytest.mark.asyncio
     async def test_invalid_json(self, handlers):
@@ -326,14 +347,14 @@ class TestInlineQuery:
         assert len(results) >= 1
 
     @pytest.mark.asyncio
-    async def test_inline_with_hours(self, handlers, storage):
-        update = make_inline_query("8 #backend", user_id=123)
+    async def test_inline_with_shift(self, handlers, storage):
+        update = make_inline_query("09:00 18:00 #backend", user_id=123)
         context = make_context()
         await handlers.handle_inline(update, context)
         update.inline_query.answer.assert_called_once()
         results = update.inline_query.answer.call_args[0][0]
         assert len(results) == 1
-        assert "8.0ч" in results[0].title
+        assert "09:00-18:00" in results[0].title
 
     @pytest.mark.asyncio
     async def test_inline_invalid_text(self, handlers):
@@ -347,13 +368,13 @@ class TestInlineQuery:
 class TestChosenInlineResult:
     @pytest.mark.asyncio
     async def test_chosen_saves_entry(self, handlers, storage):
-        update = make_chosen_result("8 #backend API", user_id=123)
+        update = make_chosen_result("09:00 18:00 #backend API", user_id=123)
         context = make_context()
         await handlers.handle_chosen_inline(update, context)
         today = date.today().isoformat()
         entries = storage.get_entries(123, date_from=today, date_to=today)
         assert len(entries) == 1
-        assert entries[0]["hours"] == 8.0
+        assert entries[0]["hours"] == 9.0
         assert entries[0]["project"] == "backend"
 
     @pytest.mark.asyncio

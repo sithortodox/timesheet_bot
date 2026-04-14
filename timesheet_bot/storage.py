@@ -15,7 +15,7 @@ class StorageBase(ABC):
     @abstractmethod
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
-        project: str = ""
+        project: str = "", start_time: str = "", end_time: str = ""
     ) -> dict: ...
 
     @abstractmethod
@@ -101,6 +101,8 @@ class SqliteStorage(StorageBase):
                 user_id INTEGER NOT NULL,
                 date TEXT NOT NULL,
                 hours REAL NOT NULL,
+                start_time TEXT DEFAULT '',
+                end_time TEXT DEFAULT '',
                 note TEXT DEFAULT '',
                 project TEXT DEFAULT '',
                 updated_at TEXT NOT NULL,
@@ -131,6 +133,11 @@ class SqliteStorage(StorageBase):
             );
         """
         )
+        for col in ("start_time", "end_time"):
+            try:
+                conn.execute(f"ALTER TABLE entries ADD COLUMN {col} TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
 
     def close(self):
@@ -163,25 +170,28 @@ class SqliteStorage(StorageBase):
 
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
-        project: str = ""
+        project: str = "", start_time: str = "", end_time: str = ""
     ) -> dict:
         updated_at = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute(
             """
-            INSERT INTO entries (user_id, date, hours, note, project, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (user_id, date, hours, start_time, end_time, note, project, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, date) DO UPDATE SET
-                hours=excluded.hours, note=excluded.note,
+                hours=excluded.hours, start_time=excluded.start_time,
+                end_time=excluded.end_time, note=excluded.note,
                 project=excluded.project, updated_at=excluded.updated_at
             """,
-            (user_id, date_str, hours, note, project, updated_at),
+            (user_id, date_str, hours, start_time, end_time, note, project, updated_at),
         )
         conn.commit()
         return {
             "user_id": user_id,
             "date": date_str,
             "hours": hours,
+            "start_time": start_time,
+            "end_time": end_time,
             "note": note,
             "project": project,
             "updated_at": updated_at,
@@ -201,7 +211,7 @@ class SqliteStorage(StorageBase):
     ) -> dict:
         month_prefix = f"{year:04d}-{month:02d}"
         conn = self._get_conn()
-        query = "SELECT date, hours, note, project FROM entries WHERE user_id = ? AND date LIKE ?"
+        query = "SELECT date, hours, start_time, end_time, note, project FROM entries WHERE user_id = ? AND date LIKE ?"
         params: list = [user_id, f"{month_prefix}%"]
         if project:
             query += " AND project = ?"
@@ -222,7 +232,7 @@ class SqliteStorage(StorageBase):
     def get_week_stats(self, user_id: int, date_from: str, date_to: str) -> dict:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT date, hours, note, project FROM entries "
+            "SELECT date, hours, start_time, end_time, note, project FROM entries "
             "WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date",
             (user_id, date_from, date_to),
         ).fetchall()

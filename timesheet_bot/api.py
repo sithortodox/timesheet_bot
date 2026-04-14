@@ -8,6 +8,7 @@ import time
 from aiohttp import web
 
 from .storage import StorageBase
+from .utils import parse_shift_time
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class WebAppAPI:
         for e in entries:
             result[e["date"]] = {
                 "hours": e["hours"],
+                "start_time": e.get("start_time", ""),
+                "end_time": e.get("end_time", ""),
                 "note": e.get("note", ""),
                 "project": e.get("project", ""),
                 "updated_at": e.get("updated_at", ""),
@@ -109,14 +112,24 @@ class WebAppAPI:
             return web.json_response({"error": "invalid json"}, status=400)
 
         date_str = body.get("date")
-        hours = body.get("hours")
-        if not date_str or hours is None:
-            return web.json_response({"error": "date and hours required"}, status=400)
+        start_time = body.get("start_time", "")
+        end_time = body.get("end_time", "")
+        hours_raw = body.get("hours")
 
-        try:
-            hours = float(hours)
-        except (ValueError, TypeError):
-            return web.json_response({"error": "hours must be a number"}, status=400)
+        if not date_str:
+            return web.json_response({"error": "date required"}, status=400)
+
+        if start_time and end_time:
+            hours = parse_shift_time(start_time, end_time)
+            if hours is None:
+                return web.json_response({"error": "invalid start_time/end_time (use HH:MM)"}, status=400)
+        elif hours_raw is not None:
+            try:
+                hours = float(hours_raw)
+            except (ValueError, TypeError):
+                return web.json_response({"error": "hours must be a number"}, status=400)
+        else:
+            return web.json_response({"error": "start_time+end_time or hours required"}, status=400)
 
         if hours <= 0 or hours > 24:
             return web.json_response({"error": "hours must be 0.5-24"}, status=400)
@@ -124,7 +137,7 @@ class WebAppAPI:
         note = body.get("note", "")
         project = body.get("project", "")
 
-        entry = self.storage.save_entry(user_id, date_str, hours, note, project)
+        entry = self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
         logger.info(f"API save_entry: user={user_id} date={date_str} hours={hours}")
         return web.json_response({"ok": True, "entry": entry})
 

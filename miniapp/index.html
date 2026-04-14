@@ -368,6 +368,68 @@
   }
   .delete-btn:active { background: rgba(255,77,77,0.1); }
 
+  /* ── Shift picker ── */
+  .shift-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .shift-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .time-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    padding: 8px 12px;
+    outline: none;
+    width: 130px;
+    transition: border-color 0.15s;
+  }
+  .time-input:focus { border-color: var(--accent); }
+  .time-input::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+  .shift-dash {
+    color: var(--text-muted);
+    font-size: 16px;
+  }
+
+  .shift-result {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--accent);
+    text-align: center;
+  }
+
+  .quick-shifts {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .project-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .project-input:focus { border-color: var(--accent); }
+  .project-input::placeholder { color: var(--text-muted); }
+
   /* ── Log panel ── */
   .log-list { margin-top: 8px; }
 
@@ -652,13 +714,13 @@ async function apiGetEntries() {
   } catch { return null; }
 }
 
-async function apiSaveEntry(dateStr, hours, note, project) {
+async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime) {
   if (!tg?.initData) return false;
   try {
     const resp = await fetch(`${API_BASE}/entry`, {
       method: 'POST',
       headers: apiHeaders(),
-      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || ''})
+      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || ''})
     });
     return resp.ok;
   } catch { return false; }
@@ -702,12 +764,12 @@ async function loadEntries() {
   }
 }
 
-async function saveEntry(dateStr, hours, note, project) {
-  entries[dateStr] = { hours, note: note || '', project: project || '', updated_at: new Date().toISOString() };
+async function saveEntry(dateStr, hours, note, project, startTime, endTime) {
+  entries[dateStr] = { hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', updated_at: new Date().toISOString() };
   saveEntriesLocal();
-  await apiSaveEntry(dateStr, hours, note, project);
+  await apiSaveEntry(dateStr, hours, note, project, startTime, endTime);
   if (tg?.sendData) {
-    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || ''}));
+    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || ''}));
   }
 }
 
@@ -810,12 +872,23 @@ function renderCalendar() {
 }
 
 // ── Entry form ───────────────────────────────────────────────────────────────
-let formHours = 8;
+
+function calcHours(start, end) {
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return null;
+  const diff = (eh * 60 + em) - (sh * 60 + sm);
+  if (diff <= 0) return null;
+  return diff / 60;
+}
 
 function openEntry(dateStr) {
   selectedDate = dateStr;
   const existing = entries[dateStr];
-  formHours = existing?.hours ?? 8;
+  const defStart = existing?.start_time || '09:00';
+  const defEnd = existing?.end_time || '18:00';
+  const defHours = existing?.hours ?? 9;
 
   const [year, month, day] = dateStr.split('-').map(Number);
   const d = new Date(year, month-1, day);
@@ -831,19 +904,26 @@ function openEntry(dateStr) {
       </div>
 
       <div class="form-row">
-        <div class="form-label">Часов отработано</div>
-        <div class="hours-picker">
-          <div class="hours-stepper">
-            <button class="step-btn" id="stepDown">−</button>
-            <div class="hours-val" id="hoursVal">${formHours}</div>
-            <button class="step-btn" id="stepUp">＋</button>
+        <div class="form-label">Начало и конец смены</div>
+        <div class="shift-picker">
+          <div class="shift-inputs">
+            <input type="time" class="time-input" id="startTime" value="${defStart}">
+            <span class="shift-dash">—</span>
+            <input type="time" class="time-input" id="endTime" value="${defEnd}">
           </div>
-          <div class="quick-hours">
-            ${[4,6,7,8,9,10].map(h =>
-              `<button class="qh-btn${h===formHours?' active':''}" data-h="${h}">${h}</button>`
+          <div class="shift-result" id="shiftResult">${defHours}ч</div>
+          <div class="quick-shifts">
+            ${[['09:00','18:00'],['09:00','17:00'],['08:00','17:00'],['10:00','19:00']].map(([s,e]) =>
+              `<button class="qh-btn${s===defStart&&e===defEnd?' active':''}" data-s="${s}" data-e="${e}">${s}-${e}</button>`
             ).join('')}
           </div>
         </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-label">Проект (необязательно)</div>
+        <input type="text" class="project-input" id="projectInput"
+          placeholder="#backend" value="${existing?.project ? '#'+existing.project : ''}">
       </div>
 
       <div class="form-row">
@@ -862,31 +942,35 @@ function openEntry(dateStr) {
     selectedDate = null;
   };
 
-  function updateHoursDisplay() {
-    document.getElementById('hoursVal').textContent = formHours;
+  function updateShiftResult() {
+    const s = document.getElementById('startTime').value;
+    const e = document.getElementById('endTime').value;
+    const h = calcHours(s, e);
+    document.getElementById('shiftResult').textContent = h ? h.toFixed(1).replace('.0','') + 'ч' : '—';
     form.querySelectorAll('.qh-btn').forEach(b => {
-      b.classList.toggle('active', Number(b.dataset.h) === formHours);
+      b.classList.toggle('active', b.dataset.s === s && b.dataset.e === e);
     });
   }
 
-  document.getElementById('stepDown').onclick = () => {
-    formHours = Math.max(0.5, formHours - 0.5);
-    updateHoursDisplay();
-  };
-  document.getElementById('stepUp').onclick = () => {
-    formHours = Math.min(24, formHours + 0.5);
-    updateHoursDisplay();
-  };
+  document.getElementById('startTime').oninput = updateShiftResult;
+  document.getElementById('endTime').oninput = updateShiftResult;
   form.querySelectorAll('.qh-btn').forEach(b => {
     b.onclick = () => {
-      formHours = Number(b.dataset.h);
-      updateHoursDisplay();
+      document.getElementById('startTime').value = b.dataset.s;
+      document.getElementById('endTime').value = b.dataset.e;
+      updateShiftResult();
     };
   });
 
   document.getElementById('saveBtn').onclick = async () => {
+    const startTime = document.getElementById('startTime').value;
+    const endTime = document.getElementById('endTime').value;
+    const hours = calcHours(startTime, endTime);
+    if (!hours) { showToast('Укажи правильное время'); return; }
+    const projectRaw = document.getElementById('projectInput').value.trim();
+    const project = projectRaw.startsWith('#') ? projectRaw.slice(1) : projectRaw;
     const note = document.getElementById('noteInput').value.trim();
-    await saveEntry(dateStr, formHours, note);
+    await saveEntry(dateStr, hours, note, project, startTime, endTime);
     form.innerHTML = '';
     selectedDate = null;
     renderAll();

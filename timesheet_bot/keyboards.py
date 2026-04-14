@@ -11,7 +11,7 @@ def main_keyboard(mini_app_url: str) -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton("📋 Открыть табель", web_app=WebAppInfo(url=mini_app_url))],
         [
-            KeyboardButton("⏱ Записать сегодня"),
+            KeyboardButton("⏱ Записать смену"),
             KeyboardButton("📊 Статистика"),
         ],
         [
@@ -36,8 +36,9 @@ def entries_keyboard(entries: list[dict], action: str) -> InlineKeyboardMarkup:
     for entry in entries[:10]:
         date_str = entry["date"]
         proj = f" #{entry['project']}" if entry.get("project") else ""
+        shift = f" {entry.get('start_time', '')}-{entry.get('end_time', '')}" if entry.get("start_time") else ""
         note_preview = f" — {entry['note'][:20]}" if entry.get("note") else ""
-        label = f"{date_str}: {entry['hours']}ч{proj}{note_preview}"
+        label = f"{date_str}: {entry['hours']}ч{shift}{proj}{note_preview}"
         buttons.append(
             [InlineKeyboardButton(label, callback_data=f"{action}:{date_str}")]
         )
