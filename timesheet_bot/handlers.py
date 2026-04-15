@@ -23,7 +23,9 @@ from .storage import StorageBase
 from .utils import (
     RateLimiter,
     format_entry_line,
+    format_money,
     format_stats_header,
+    parse_payment,
     parse_project,
     parse_shift_time,
 )
@@ -57,7 +59,7 @@ class Handlers:
             "_Например:_\n"
             "`09:00 18:00` — начало и конец смены за сегодня\n"
             "`09:00 18:00 #backend Работал над API` — с проектом\n"
-            "`09:00 18:00 2025-04-10 #design Встречи` — дата + проект + заметка",
+            "`09:00 18:00 $5000 #backend` — с оплатой и проектом\n"            "`09:00 18:00 2025-04-10 #design Встречи` — дата + проект + заметка",
             parse_mode="Markdown",
             reply_markup=main_keyboard(self.config.mini_app_url),
         )
@@ -66,10 +68,11 @@ class Handlers:
         await update.message.reply_text(
             "📖 *Как пользоваться:*\n\n"
             "• `09:00 18:00` — записать смену за сегодня\n"
-            "• `09:00 18:00 #backend API-ревью` — с проектом и заметкой\n"
+            "• `09:00 18:00 $5000` — с оплатой за смену\n"
+            "• `09:00 18:00 $5000 #backend API-ревью` — оплата + проект + заметка\n"
             "• `09:00 18:00 2025-04-10` — за конкретную дату\n"
             "• `09:00 18:00 2025-04-10 #design Прототип` — всё вместе\n\n"
-            "Часы рассчитываются автоматически из начала и конца смены.\n\n"
+            "Часы рассчитываются автоматически. Оплата указывается через `$`.\n\n"
             "📋 *Открыть табель* — полный интерфейс с календарём\n"
             "📊 *Статистика* — итоги за месяц + по проектам\n"
             "📆 *Неделя* — итоги за текущую/прошлую неделю\n"
@@ -133,6 +136,37 @@ class Handlers:
             reply_markup=project_keyboard(proj_list),
         )
 
+    async def budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        now = datetime.now()
+        budget_data = self.storage.get_month_budget(user_id, now.year, now.month)
+
+        if not budget_data["entries"]:
+            await update.message.reply_text("💰 В этом месяце записей пока нет.")
+            return
+
+        lines = [f"💰 *Бюджет за {month_name[now.month]} {now.year}*\n"]
+        lines.append(f"⏱ Отработано: *{budget_data['total_hours']:.1f} ч*")
+        lines.append(f"💵 Заработано: *{format_money(budget_data['total_payment'])}*")
+        lines.append(f"✅ Оплачено смен: *{budget_data['paid_days']}*")
+        lines.append(f"⏳ Не оплачено: *{budget_data['unpaid_days']}*\n")
+
+        project_income = budget_data["project_income"]
+        paid_projects = {k: v for k, v in project_income.items() if v > 0}
+        if paid_projects:
+            lines.append("*Доход по проектам:*")
+            for proj, income in sorted(paid_projects.items(), key=lambda x: -x[1]):
+                lines.append(f"  🏷 #{proj}: {format_money(income)}")
+            lines.append("")
+
+        avg_per_day = budget_data["total_payment"] / budget_data["paid_days"] if budget_data["paid_days"] else 0
+        avg_per_hour = budget_data["total_payment"] / budget_data["total_hours"] if budget_data["total_hours"] else 0
+        if avg_per_day > 0:
+            lines.append(f"📈 Среднее в день: *{format_money(avg_per_day)}*")
+            lines.append(f"📈 Среднее в час: *{format_money(avg_per_hour)}*")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         if _rate_limiter.is_limited(user_id):
@@ -171,6 +205,8 @@ class Handlers:
             return await self.projects(update, context)
         if text == "⏰ Напоминания":
             return await self._show_reminder_settings(update, context)
+        if text == "💰 Бюджет":
+            return await self.budget(update, context)
 
         parts = text.split(maxsplit=3)
         if len(parts) < 2:
@@ -187,8 +223,10 @@ class Handlers:
         project = ""
 
         rest_parts = parts[2:] if len(parts) > 2 else []
+        payment = 0
         if rest_parts:
             rest = " ".join(rest_parts)
+            payment, rest = parse_payment(rest)
             try:
                 candidate = rest.split()[0]
                 datetime.strptime(candidate, "%Y-%m-%d")
@@ -199,14 +237,15 @@ class Handlers:
             except ValueError:
                 project, note = parse_project(rest)
 
-        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
 
+        pay_text = f"\n💵 Оплата: _{format_money(payment)}_" if payment > 0 else ""
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
         note_text = f"\n📝 Заметка: _{note}_" if note else ""
         await update.message.reply_text(
             f"✅ Записано!\n"
             f"📅 Дата: *{date_str}*\n"
-            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{proj_text}{note_text}",
+            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{pay_text}{proj_text}{note_text}",
             parse_mode="Markdown",
         )
 
@@ -285,7 +324,8 @@ class Handlers:
                 hours = parse_shift_time(start_time, end_time) if start_time and end_time else float(payload.get("hours", 0))
                 note = payload.get("note", "")
                 project = payload.get("project", "")
-                self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
+                payment = float(payload.get("payment", 0))
+                self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
                 shift = f" ({start_time}-{end_time})" if start_time and end_time else ""
                 proj = f" #{project}" if project else ""
                 await update.message.reply_text(
@@ -476,16 +516,20 @@ class Handlers:
             return
 
         project, note = "", ""
+        payment = 0
         if len(parts) > 2:
-            project, note = parse_project(parts[2])
-        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
+            rest = " ".join(parts[2:])
+            payment, rest = parse_payment(rest)
+            project, note = parse_project(rest)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
 
+        pay_text = f"\n💵 Оплата: _{format_money(payment)}_" if payment > 0 else ""
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
         note_text = f"\n📝 Заметка: _{note}_" if note else ""
         await update.message.reply_text(
             f"✅ Запись обновлена!\n"
             f"📅 Дата: *{date_str}*\n"
-            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{proj_text}{note_text}",
+            f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{pay_text}{proj_text}{note_text}",
             parse_mode="Markdown",
         )
 

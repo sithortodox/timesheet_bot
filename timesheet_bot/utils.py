@@ -37,13 +37,41 @@ def parse_project(text: str) -> tuple[str, str]:
     return "", text
 
 
+_PAYMENT_RE = re.compile(r"^\$(\d+(?:[.,]\d{1,2})?)(?:[а-яА-Яa-zA-Z.]*)$")
+_PAYMENT_SUFFIX = re.compile(r"^(руб|р|rub)\.?$", re.IGNORECASE)
+
+
+def parse_payment(text: str) -> tuple[float, str]:
+    parts = text.split()
+    for i, p in enumerate(parts):
+        m = _PAYMENT_RE.match(p)
+        if m:
+            val = float(m.group(1).replace(",", "."))
+            remaining_parts = parts[:i] + parts[i + 1:]
+            if remaining_parts and _PAYMENT_SUFFIX.match(remaining_parts[0]):
+                remaining_parts = remaining_parts[1:]
+            remaining = " ".join(remaining_parts)
+            return val, remaining
+    return 0, text
+
+
+def format_money(amount: float) -> str:
+    if amount == int(amount):
+        return f"{int(amount)}₽"
+    return f"{amount:.2f}₽"
+
+
 def format_entry_line(entry: dict) -> str:
     proj = f" #{entry['project']}" if entry.get("project") else ""
     note = f" — {entry['note']}" if entry.get("note") else ""
     shift = ""
     if entry.get("start_time") and entry.get("end_time"):
         shift = f" {entry['start_time']}-{entry['end_time']}"
-    return f"• {entry['date']}: {entry['hours']}ч{shift}{proj}{note}"
+    pay = ""
+    payment = entry.get("payment", 0) or 0
+    if payment > 0:
+        pay = f" 💰{format_money(payment)}"
+    return f"• {entry['date']}: {entry['hours']}ч{shift}{proj}{pay}{note}"
 
 
 def format_stats_header(title: str, days_worked: int, total_hours: float, avg_hours: float) -> list[str]:

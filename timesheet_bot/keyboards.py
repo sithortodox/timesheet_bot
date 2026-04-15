@@ -24,9 +24,12 @@ def main_keyboard(mini_app_url: str) -> ReplyKeyboardMarkup:
         ],
         [
             KeyboardButton("📤 Экспорт"),
-            KeyboardButton("⏰ Напоминания"),
+            KeyboardButton("💰 Бюджет"),
         ],
-        [KeyboardButton("❓ Помощь")],
+        [
+            KeyboardButton("⏰ Напоминания"),
+            KeyboardButton("❓ Помощь"),
+        ],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -37,8 +40,9 @@ def entries_keyboard(entries: list[dict], action: str) -> InlineKeyboardMarkup:
         date_str = entry["date"]
         proj = f" #{entry['project']}" if entry.get("project") else ""
         shift = f" {entry.get('start_time', '')}-{entry.get('end_time', '')}" if entry.get("start_time") else ""
+        pay = f" 💰{int(entry.get('payment', 0) or 0)}₽" if (entry.get("payment", 0) or 0) > 0 else ""
         note_preview = f" — {entry['note'][:20]}" if entry.get("note") else ""
-        label = f"{date_str}: {entry['hours']}ч{shift}{proj}{note_preview}"
+        label = f"{date_str}: {entry['hours']}ч{shift}{pay}{proj}{note_preview}"
         buttons.append(
             [InlineKeyboardButton(label, callback_data=f"{action}:{date_str}")]
         )

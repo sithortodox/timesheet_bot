@@ -96,6 +96,7 @@ class WebAppAPI:
                 "end_time": e.get("end_time", ""),
                 "note": e.get("note", ""),
                 "project": e.get("project", ""),
+                "payment": e.get("payment", 0),
                 "updated_at": e.get("updated_at", ""),
             }
 
@@ -136,8 +137,9 @@ class WebAppAPI:
 
         note = body.get("note", "")
         project = body.get("project", "")
+        payment = float(body.get("payment", 0))
 
-        entry = self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time)
+        entry = self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
         logger.info(f"API save_entry: user={user_id} date={date_str} hours={hours}")
         return web.json_response({"ok": True, "entry": entry})
 

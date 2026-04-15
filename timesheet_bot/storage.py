@@ -15,7 +15,8 @@ class StorageBase(ABC):
     @abstractmethod
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
-        project: str = "", start_time: str = "", end_time: str = ""
+        project: str = "", start_time: str = "", end_time: str = "",
+        payment: float = 0
     ) -> dict: ...
 
     @abstractmethod
@@ -36,6 +37,11 @@ class StorageBase(ABC):
 
     @abstractmethod
     def get_projects(self, user_id: int) -> list[str]: ...
+
+    @abstractmethod
+    def get_month_budget(
+        self, user_id: int, year: int, month: int
+    ) -> dict: ...
 
     @abstractmethod
     def set_reminder(
@@ -105,6 +111,7 @@ class SqliteStorage(StorageBase):
                 end_time TEXT DEFAULT '',
                 note TEXT DEFAULT '',
                 project TEXT DEFAULT '',
+                payment REAL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, date)
             );
@@ -138,6 +145,10 @@ class SqliteStorage(StorageBase):
                 conn.execute(f"ALTER TABLE entries ADD COLUMN {col} TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+        try:
+            conn.execute("ALTER TABLE entries ADD COLUMN payment REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
     def close(self):
@@ -170,20 +181,22 @@ class SqliteStorage(StorageBase):
 
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
-        project: str = "", start_time: str = "", end_time: str = ""
+        project: str = "", start_time: str = "", end_time: str = "",
+        payment: float = 0
     ) -> dict:
         updated_at = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute(
             """
-            INSERT INTO entries (user_id, date, hours, start_time, end_time, note, project, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (user_id, date, hours, start_time, end_time, note, project, payment, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, date) DO UPDATE SET
                 hours=excluded.hours, start_time=excluded.start_time,
                 end_time=excluded.end_time, note=excluded.note,
-                project=excluded.project, updated_at=excluded.updated_at
+                project=excluded.project, payment=excluded.payment,
+                updated_at=excluded.updated_at
             """,
-            (user_id, date_str, hours, start_time, end_time, note, project, updated_at),
+            (user_id, date_str, hours, start_time, end_time, note, project, payment, updated_at),
         )
         conn.commit()
         return {
@@ -194,6 +207,7 @@ class SqliteStorage(StorageBase):
             "end_time": end_time,
             "note": note,
             "project": project,
+            "payment": payment,
             "updated_at": updated_at,
         }
 
@@ -211,7 +225,7 @@ class SqliteStorage(StorageBase):
     ) -> dict:
         month_prefix = f"{year:04d}-{month:02d}"
         conn = self._get_conn()
-        query = "SELECT date, hours, start_time, end_time, note, project FROM entries WHERE user_id = ? AND date LIKE ?"
+        query = "SELECT date, hours, start_time, end_time, note, project, payment FROM entries WHERE user_id = ? AND date LIKE ?"
         params: list = [user_id, f"{month_prefix}%"]
         if project:
             query += " AND project = ?"
@@ -232,7 +246,7 @@ class SqliteStorage(StorageBase):
     def get_week_stats(self, user_id: int, date_from: str, date_to: str) -> dict:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT date, hours, start_time, end_time, note, project FROM entries "
+            "SELECT date, hours, start_time, end_time, note, project, payment FROM entries "
             "WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date",
             (user_id, date_from, date_to),
         ).fetchall()
@@ -251,12 +265,40 @@ class SqliteStorage(StorageBase):
         month_prefix = f"{year:04d}-{month:02d}"
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT project, SUM(hours) as total_hours, COUNT(*) as days "
+            "SELECT project, SUM(hours) as total_hours, COUNT(*) as days, "
+            "SUM(payment) as total_payment "
             "FROM entries WHERE user_id = ? AND date LIKE ? AND project != '' "
             "GROUP BY project ORDER BY total_hours DESC",
             (user_id, f"{month_prefix}%"),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_month_budget(self, user_id: int, year: int, month: int) -> dict:
+        month_prefix = f"{year:04d}-{month:02d}"
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT date, hours, start_time, end_time, note, project, payment "
+            "FROM entries WHERE user_id = ? AND date LIKE ? ORDER BY date",
+            (user_id, f"{month_prefix}%"),
+        ).fetchall()
+        entries = [dict(r) for r in rows]
+        total_hours = sum(e["hours"] for e in entries)
+        total_payment = sum(e.get("payment", 0) or 0 for e in entries)
+        paid_days = sum(1 for e in entries if (e.get("payment", 0) or 0) > 0)
+        unpaid_days = len(entries) - paid_days
+        project_income: dict[str, float] = {}
+        for e in entries:
+            p = e.get("project", "") or "—"
+            project_income.setdefault(p, 0)
+            project_income[p] += e.get("payment", 0) or 0
+        return {
+            "entries": entries,
+            "total_hours": total_hours,
+            "total_payment": total_payment,
+            "paid_days": paid_days,
+            "unpaid_days": unpaid_days,
+            "project_income": project_income,
+        }
 
     def get_projects(self, user_id: int) -> list[str]:
         conn = self._get_conn()

@@ -430,6 +430,22 @@
   .project-input:focus { border-color: var(--accent); }
   .project-input::placeholder { color: var(--text-muted); }
 
+  .payment-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--accent);
+    font-family: 'Unbounded', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 8px 12px;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  .payment-input:focus { border-color: var(--accent); }
+  .payment-input::placeholder { color: var(--text-muted); font-weight: 400; font-size: 13px; }
+
   /* ── Log panel ── */
   .log-list { margin-top: 8px; }
 
@@ -633,6 +649,7 @@
 <div class="tabs">
   <button class="tab active" data-tab="calendar">Календарь</button>
   <button class="tab" data-tab="log">Журнал</button>
+  <button class="tab" data-tab="budget">Бюджет</button>
   <button class="tab" data-tab="stats">Статистика</button>
 </div>
 
@@ -647,6 +664,11 @@
   <!-- ── Log panel ── -->
   <div class="panel" id="panel-log">
     <div class="log-list" id="logList"></div>
+  </div>
+
+  <!-- ── Budget panel ── -->
+  <div class="panel" id="panel-budget">
+    <div id="budgetGrid"></div>
   </div>
 
   <!-- ── Stats panel ── -->
@@ -714,13 +736,13 @@ async function apiGetEntries() {
   } catch { return null; }
 }
 
-async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime) {
+async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
   if (!tg?.initData) return false;
   try {
     const resp = await fetch(`${API_BASE}/entry`, {
       method: 'POST',
       headers: apiHeaders(),
-      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || ''})
+      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0})
     });
     return resp.ok;
   } catch { return false; }
@@ -764,12 +786,12 @@ async function loadEntries() {
   }
 }
 
-async function saveEntry(dateStr, hours, note, project, startTime, endTime) {
-  entries[dateStr] = { hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', updated_at: new Date().toISOString() };
+async function saveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
+  entries[dateStr] = { hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0, updated_at: new Date().toISOString() };
   saveEntriesLocal();
-  await apiSaveEntry(dateStr, hours, note, project, startTime, endTime);
+  await apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment);
   if (tg?.sendData) {
-    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || ''}));
+    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0}));
   }
 }
 
@@ -927,6 +949,12 @@ function openEntry(dateStr) {
       </div>
 
       <div class="form-row">
+        <div class="form-label">Оплата за смену (₽)</div>
+        <input type="number" class="payment-input" id="paymentInput"
+          placeholder="0" value="${existing?.payment || ''}" min="0" step="100">
+      </div>
+
+      <div class="form-row">
         <div class="form-label">Заметка (необязательно)</div>
         <textarea class="note-input" id="noteInput"
           placeholder="Что делал сегодня? Задачи, встречи…">${existing?.note ?? ''}</textarea>
@@ -970,7 +998,8 @@ function openEntry(dateStr) {
     const projectRaw = document.getElementById('projectInput').value.trim();
     const project = projectRaw.startsWith('#') ? projectRaw.slice(1) : projectRaw;
     const note = document.getElementById('noteInput').value.trim();
-    await saveEntry(dateStr, hours, note, project, startTime, endTime);
+    const payment = parseFloat(document.getElementById('paymentInput').value) || 0;
+    await saveEntry(dateStr, hours, note, project, startTime, endTime, payment);
     form.innerHTML = '';
     selectedDate = null;
     renderAll();
@@ -1018,6 +1047,7 @@ function renderLog() {
         <div class="log-date" style="color:var(--text-muted)">${dn}</div>
       </div>
       <div class="log-hrs">${entry.hours}<span>ч</span></div>
+      ${entry.payment > 0 ? `<div class="log-hrs" style="color:var(--orange)">${entry.payment.toLocaleString('ru')}₽</div>` : ''}
       <div class="log-note">${entry.note ? escapeHtml(entry.note) : '<span style="color:var(--text-muted)">–</span>'}</div>
     </div>`;
   }).join('');
@@ -1111,10 +1141,72 @@ function updateTodayBar() {
   };
 }
 
+// ── Budget panel ────────────────────────────────────────────────────────────
+function renderBudget() {
+  const { year, month } = currentMonth;
+  const me = monthEntries(year, month);
+  const totalHours = me.reduce((s,[,v]) => s + v.hours, 0);
+  const totalPayment = me.reduce((s,[,v]) => s + (v.payment || 0), 0);
+  const paidDays = me.filter(([,v]) => (v.payment || 0) > 0).length;
+  const unpaidDays = me.length - paidDays;
+
+  const projectIncome = {};
+  me.forEach(([,v]) => {
+    const p = v.project || '—';
+    projectIncome[p] = (projectIncome[p] || 0) + (v.payment || 0);
+  });
+
+  const avgPerDay = paidDays ? totalPayment / paidDays : 0;
+  const avgPerHour = totalHours ? totalPayment / totalHours : 0;
+
+  let html = `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-val">${totalHours.toFixed(1).replace('.0','')}</div>
+        <div class="stat-label">Часов отработано</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${totalPayment.toLocaleString('ru')}₽</div>
+        <div class="stat-label">Заработано</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${paidDays}</div>
+        <div class="stat-label">Оплачено смен</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${unpaidDays}</div>
+        <div class="stat-label">Не оплачено</div>
+      </div>
+    </div>`;
+
+  const paidProjects = Object.entries(projectIncome).filter(([,v]) => v > 0).sort((a,b) => b[1] - a[1]);
+  if (paidProjects.length) {
+    html += `<div style="margin-top:12px"><div class="form-label">Доход по проектам</div>`;
+    paidProjects.forEach(([p, v]) => {
+      html += `<div class="log-item"><div class="log-hrs">${v.toLocaleString('ru')}₽</div><div class="log-note">🏷 #${escapeHtml(p)}</div></div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (avgPerDay > 0) {
+    html += `<div style="margin-top:12px"><div class="stats-grid">
+      <div class="stat-card"><div class="stat-val">${avgPerDay.toLocaleString('ru',{maximumFractionDigits:0})}₽</div><div class="stat-label">Среднее/день</div></div>
+      <div class="stat-card"><div class="stat-val">${avgPerHour.toLocaleString('ru',{maximumFractionDigits:0})}₽</div><div class="stat-label">Среднее/час</div></div>
+    </div></div>`;
+  }
+
+  if (!me.length) {
+    html = `<div class="empty-state"><div class="icon">💰</div>Нет записей за ${MONTHS_RU[month]} ${year}</div>`;
+  }
+
+  document.getElementById('budgetGrid').innerHTML = html;
+}
+
 // ── Render all ───────────────────────────────────────────────────────────────
 function renderAll() {
   renderCalendar();
   if (currentTab === 'log') renderLog();
+  if (currentTab === 'budget') renderBudget();
   if (currentTab === 'stats') renderStats();
 }
 
@@ -1127,6 +1219,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     document.getElementById('panel-' + currentTab).classList.add('active');
     if (currentTab === 'log') renderLog();
+    if (currentTab === 'budget') renderBudget();
     if (currentTab === 'stats') renderStats();
     // Close any open form
     document.getElementById('entryForm').innerHTML = '';
