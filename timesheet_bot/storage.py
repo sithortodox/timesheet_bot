@@ -44,6 +44,9 @@ class StorageBase(ABC):
     ) -> dict: ...
 
     @abstractmethod
+    def get_total_budget(self, user_id: int) -> dict: ...
+
+    @abstractmethod
     def set_reminder(
         self, user_id: int, chat_id: int, enabled: bool, reminder_time: str = "19:00"
     ) -> None: ...
@@ -299,6 +302,38 @@ class SqliteStorage(StorageBase):
             "unpaid_days": unpaid_days,
             "project_income": project_income,
         }
+
+    def get_total_budget(self, user_id: int) -> dict:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COALESCE(SUM(hours),0) as total_hours, "
+            "COALESCE(SUM(payment),0) as total_payment, "
+            "COUNT(*) as total_days "
+            "FROM entries WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        result = dict(row)
+        paid = conn.execute(
+            "SELECT COUNT(*) as cnt FROM entries WHERE user_id = ? AND payment > 0",
+            (user_id,),
+        ).fetchone()
+        result["paid_days"] = paid["cnt"]
+        result["unpaid_days"] = result["total_days"] - result["paid_days"]
+        project_rows = conn.execute(
+            "SELECT project, SUM(payment) as total_payment "
+            "FROM entries WHERE user_id = ? AND project != '' "
+            "GROUP BY project ORDER BY total_payment DESC",
+            (user_id,),
+        ).fetchall()
+        result["project_income"] = {r["project"]: r["total_payment"] for r in project_rows}
+        month_rows = conn.execute(
+            "SELECT substr(date,1,7) as month, SUM(hours) as hours, SUM(payment) as payment "
+            "FROM entries WHERE user_id = ? "
+            "GROUP BY month ORDER BY month DESC",
+            (user_id,),
+        ).fetchall()
+        result["monthly"] = [dict(r) for r in month_rows]
+        return result
 
     def get_projects(self, user_id: int) -> list[str]:
         conn = self._get_conn()

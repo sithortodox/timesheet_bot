@@ -139,31 +139,54 @@ class Handlers:
     async def budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         now = datetime.now()
-        budget_data = self.storage.get_month_budget(user_id, now.year, now.month)
 
-        if not budget_data["entries"]:
-            await update.message.reply_text("💰 В этом месяце записей пока нет.")
+        total = self.storage.get_total_budget(user_id)
+        month_data = self.storage.get_month_budget(user_id, now.year, now.month)
+
+        if total["total_days"] == 0:
+            await update.message.reply_text("💰 Записей пока нет.")
             return
 
         lines = [f"💰 *Бюджет за {month_name[now.month]} {now.year}*\n"]
-        lines.append(f"⏱ Отработано: *{budget_data['total_hours']:.1f} ч*")
-        lines.append(f"💵 Заработано: *{format_money(budget_data['total_payment'])}*")
-        lines.append(f"✅ Оплачено смен: *{budget_data['paid_days']}*")
-        lines.append(f"⏳ Не оплачено: *{budget_data['unpaid_days']}*\n")
+        if month_data["entries"]:
+            lines.append(f"⏱ Отработано: *{month_data['total_hours']:.1f} ч*")
+            lines.append(f"💵 Заработано: *{format_money(month_data['total_payment'])}*")
+            lines.append(f"✅ Оплачено смен: *{month_data['paid_days']}*")
+            lines.append(f"⏳ Не оплачено: *{month_data['unpaid_days']}*\n")
 
-        project_income = budget_data["project_income"]
-        paid_projects = {k: v for k, v in project_income.items() if v > 0}
-        if paid_projects:
-            lines.append("*Доход по проектам:*")
-            for proj, income in sorted(paid_projects.items(), key=lambda x: -x[1]):
+            project_income = month_data["project_income"]
+            paid_projects = {k: v for k, v in project_income.items() if v > 0}
+            if paid_projects:
+                lines.append("*Доход по проектам (месяц):*")
+                for proj, income in sorted(paid_projects.items(), key=lambda x: -x[1]):
+                    lines.append(f"  🏷 #{proj}: {format_money(income)}")
+                lines.append("")
+
+            avg_d = month_data["total_payment"] / month_data["paid_days"] if month_data["paid_days"] else 0
+            avg_h = month_data["total_payment"] / month_data["total_hours"] if month_data["total_hours"] else 0
+            if avg_d > 0:
+                lines.append(f"📈 Среднее в день: *{format_money(avg_d)}*")
+                lines.append(f"📈 Среднее в час: *{format_money(avg_h)}*")
+        else:
+            lines.append("В этом месяце записей нет.\n")
+
+        lines.append("\n\n📊 *За всё время*\n")
+        lines.append(f"⏱ Часов: *{total['total_hours']:.1f}*")
+        lines.append(f"💵 Доход: *{format_money(total['total_payment'])}*")
+        lines.append(f"📅 Смен: *{total['total_days']}* (оплачено {total['paid_days']}, не оплачено {total['unpaid_days']})")
+
+        total_projects = {k: v for k, v in total["project_income"].items() if v > 0}
+        if total_projects:
+            lines.append("\n*Доход по проектам:*")
+            for proj, income in sorted(total_projects.items(), key=lambda x: -x[1]):
                 lines.append(f"  🏷 #{proj}: {format_money(income)}")
-            lines.append("")
 
-        avg_per_day = budget_data["total_payment"] / budget_data["paid_days"] if budget_data["paid_days"] else 0
-        avg_per_hour = budget_data["total_payment"] / budget_data["total_hours"] if budget_data["total_hours"] else 0
-        if avg_per_day > 0:
-            lines.append(f"📈 Среднее в день: *{format_money(avg_per_day)}*")
-            lines.append(f"📈 Среднее в час: *{format_money(avg_per_hour)}*")
+        if total["monthly"]:
+            lines.append("\n*По месяцам:*")
+            for m in total["monthly"][:6]:
+                lines.append(f"  📅 {m['month']}: {m['hours']:.0f}ч, {format_money(m['payment'])}")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 

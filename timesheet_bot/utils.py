@@ -50,6 +50,8 @@ def parse_payment(text: str) -> tuple[float, str]:
             remaining_parts = parts[:i] + parts[i + 1:]
             if remaining_parts and _PAYMENT_SUFFIX.match(remaining_parts[0]):
                 remaining_parts = remaining_parts[1:]
+            if remaining_parts and _PAYMENT_SUFFIX.match(remaining_parts[-1]):
+                remaining_parts = remaining_parts[:-1]
             remaining = " ".join(remaining_parts)
             return val, remaining
     return 0, text
