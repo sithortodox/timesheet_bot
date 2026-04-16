@@ -994,8 +994,8 @@ function openEntry(dateStr) {
 
       <div class="form-row">
         <div class="form-label">Проект (необязательно)</div>
-        <input type="text" class="project-input" id="projectInput"
-          placeholder="#backend" value="${existing?.project ? '#'+existing.project : ''}">
+        <input type="text" class="project-input" id="projectInput" inputmode="text" lang="ru"
+          placeholder="Название проекта" value="${existing?.project || ''}">
       </div>
 
       <div class="form-row">
