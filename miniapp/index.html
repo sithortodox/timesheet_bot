@@ -971,10 +971,24 @@ function openEntry(dateStr) {
           </div>
           <div class="shift-result" id="shiftResult">${defHours}ч</div>
           <div class="quick-shifts">
-            ${[['09:00','18:00'],['09:00','17:00'],['08:00','17:00'],['10:00','19:00']].map(([s,e]) =>
-              `<button class="qh-btn${s===defStart&&e===defEnd?' active':''}" data-s="${s}" data-e="${e}">${s}-${e}</button>`
+            ${[
+              ['08:00','17:00','8ч'],
+              ['08:00','16:00','8ч'],
+              ['08:00','18:00','10ч'],
+              ['08:00','20:00','12ч'],
+              ['09:00','18:00','9ч'],
+              ['09:00','17:00','8ч'],
+              ['09:00','19:00','10ч'],
+              ['09:00','20:00','11ч'],
+              ['10:00','19:00','9ч'],
+              ['10:00','18:00','8ч'],
+              ['10:00','20:00','10ч'],
+              ['12:00','20:00','8ч'],
+            ].map(([s,e,l]) =>
+              `<button class="qh-btn${s===defStart&&e===defEnd?' active':''}" data-s="${s}" data-e="${e}">${s}–${e}</button>`
             ).join('')}
           </div>
+          <div class="form-label" style="margin-top:8px;font-size:11px;color:var(--text-muted)">или укажи своё время:</div>
         </div>
       </div>
 
