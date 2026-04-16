@@ -47,6 +47,22 @@ class StorageBase(ABC):
     def get_total_budget(self, user_id: int) -> dict: ...
 
     @abstractmethod
+    def save_income(
+        self, user_id: int, date_str: str, amount: float, note: str = ""
+    ) -> dict: ...
+
+    @abstractmethod
+    def delete_income(self, user_id: int, income_id: int) -> bool: ...
+
+    @abstractmethod
+    def get_income(
+        self, user_id: int, date_from: str = None, date_to: str = None
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    def get_income_total(self, user_id: int, date_from: str = None, date_to: str = None) -> float: ...
+
+    @abstractmethod
     def set_reminder(
         self, user_id: int, chat_id: int, enabled: bool, reminder_time: str = "19:00"
     ) -> None: ...
@@ -141,6 +157,17 @@ class SqliteStorage(StorageBase):
                 user_id INTEGER PRIMARY KEY,
                 chat_id INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS income (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                amount REAL NOT NULL,
+                note TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_income_user_date
+                ON income(user_id, date);
         """
         )
         for col in ("start_time", "end_time"):
@@ -334,6 +361,63 @@ class SqliteStorage(StorageBase):
         ).fetchall()
         result["monthly"] = [dict(r) for r in month_rows]
         return result
+
+    def save_income(
+        self, user_id: int, date_str: str, amount: float, note: str = ""
+    ) -> dict:
+        created_at = datetime.now().isoformat()
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO income (user_id, date, amount, note, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, date_str, amount, note, created_at),
+        )
+        conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "user_id": user_id,
+            "date": date_str,
+            "amount": amount,
+            "note": note,
+            "created_at": created_at,
+        }
+
+    def delete_income(self, user_id: int, income_id: int) -> bool:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM income WHERE id = ? AND user_id = ?",
+            (income_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_income(
+        self, user_id: int, date_from: str = None, date_to: str = None
+    ) -> list[dict]:
+        conn = self._get_conn()
+        query = "SELECT * FROM income WHERE user_id = ?"
+        params: list = [user_id]
+        if date_from:
+            query += " AND date >= ?"
+            params.append(date_from)
+        if date_to:
+            query += " AND date <= ?"
+            params.append(date_to)
+        query += " ORDER BY date DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_income_total(self, user_id: int, date_from: str = None, date_to: str = None) -> float:
+        conn = self._get_conn()
+        query = "SELECT COALESCE(SUM(amount),0) as total FROM income WHERE user_id = ?"
+        params: list = [user_id]
+        if date_from:
+            query += " AND date >= ?"
+            params.append(date_from)
+        if date_to:
+            query += " AND date <= ?"
+            params.append(date_to)
+        row = conn.execute(query, params).fetchone()
+        return row["total"]
 
     def get_projects(self, user_id: int) -> list[str]:
         conn = self._get_conn()

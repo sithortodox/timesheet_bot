@@ -61,6 +61,9 @@ class WebAppAPI:
             web.get("/api/entries", self.get_entries),
             web.post("/api/entry", self.save_entry),
             web.delete("/api/entry", self.delete_entry),
+            web.get("/api/income", self.get_income),
+            web.post("/api/income", self.save_income),
+            web.delete("/api/income", self.delete_income),
             web.get("/api/health", self.health),
         ])
 
@@ -160,4 +163,50 @@ class WebAppAPI:
         deleted = self.storage.delete_entry(user_id, date_str)
         if deleted:
             logger.info(f"API delete_entry: user={user_id} date={date_str}")
+        return web.json_response({"ok": deleted})
+
+    async def get_income(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        date_from = request.query.get("date_from")
+        date_to = request.query.get("date_to")
+        items = self.storage.get_income(user_id, date_from=date_from, date_to=date_to)
+        return web.json_response(items)
+
+    async def save_income(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        date_str = body.get("date")
+        amount = body.get("amount")
+        if not date_str or amount is None:
+            return web.json_response({"error": "date and amount required"}, status=400)
+        try:
+            amount = float(amount)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "amount must be a number"}, status=400)
+        if amount <= 0:
+            return web.json_response({"error": "amount must be positive"}, status=400)
+        note = body.get("note", "")
+        result = self.storage.save_income(user_id, date_str, amount, note)
+        logger.info(f"API save_income: user={user_id} date={date_str} amount={amount}")
+        return web.json_response({"ok": True, "income": result})
+
+    async def delete_income(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        income_id = body.get("id")
+        if income_id is None:
+            return web.json_response({"error": "id required"}, status=400)
+        deleted = self.storage.delete_income(user_id, int(income_id))
         return web.json_response({"ok": deleted})

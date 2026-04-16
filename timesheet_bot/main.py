@@ -57,6 +57,7 @@ def create_app(config: Config | None = None) -> Application:
     app.add_handler(CommandHandler("week", handlers.week))
     app.add_handler(CommandHandler("projects", handlers.projects))
     app.add_handler(CommandHandler("budget", handlers.budget))
+    app.add_handler(CommandHandler("salary", handlers.salary))
     app.add_handler(CommandHandler("team_stats", handlers.team_stats))
     app.add_handler(CommandHandler("team_export", handlers.team_export))
     app.add_handler(InlineQueryHandler(handlers.handle_inline))

@@ -19,6 +19,7 @@
     --text-dim: #999;
     --red: #ff4d4d;
     --orange: #ff8c00;
+    --green: #4caf50;
     --radius: 12px;
   }
 
@@ -711,6 +712,7 @@ function escapeHtml(str) {
 // ── State ───────────────────────────────────────────────────────────────────
 let currentMonth;
 let entries = {};
+let incomeList = [];
 let selectedDate = null;
 let currentTab = 'calendar';
 
@@ -760,6 +762,27 @@ async function apiDeleteEntry(dateStr) {
   } catch { return false; }
 }
 
+async function apiGetIncome() {
+  if (!tg?.initData) return [];
+  try {
+    const resp = await fetch(`${API_BASE}/income`, {headers: apiHeaders()});
+    if (!resp.ok) return [];
+    return await resp.json();
+  } catch { return []; }
+}
+
+async function apiSaveIncome(dateStr, amount, note) {
+  if (!tg?.initData) return false;
+  try {
+    const resp = await fetch(`${API_BASE}/income`, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({date: dateStr, amount, note: note || ''})
+    });
+    return resp.ok;
+  } catch { return false; }
+}
+
 // ── Storage ─────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'timesheet_v2_' + (tg?.initDataUnsafe?.user?.id || 'local');
 
@@ -784,6 +807,7 @@ async function loadEntries() {
   } else {
     loadEntriesLocal();
   }
+  incomeList = await apiGetIncome();
 }
 
 async function saveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
@@ -881,8 +905,20 @@ function renderCalendar() {
     if (entry) {
       const hrs = document.createElement('div');
       hrs.className = 'day-hrs';
-      hrs.textContent = entry.hours % 1 === 0 ? entry.hours + 'ч' : entry.hours + 'ч';
+      let label = (entry.hours % 1 === 0 ? entry.hours : entry.hours.toFixed(1)) + 'ч';
+      if (entry.payment > 0) label += ' 💰';
+      hrs.textContent = label;
       el.appendChild(hrs);
+    }
+
+    const dayIncome = incomeList.filter(i => i.date === dateStr);
+    if (dayIncome.length > 0) {
+      const sal = document.createElement('div');
+      sal.className = 'day-hrs';
+      sal.style.color = 'var(--green)';
+      const totalIncome = dayIncome.reduce((s, i) => s + i.amount, 0);
+      sal.textContent = totalIncome.toLocaleString('ru') + '₽';
+      el.appendChild(sal);
     }
 
     if (!isFuture) {
@@ -955,6 +991,12 @@ function openEntry(dateStr) {
       </div>
 
       <div class="form-row">
+        <div class="form-label">Зарплата / Аванс (₽)</div>
+        <input type="number" class="payment-input" id="salaryInput"
+          placeholder="0" min="0" step="1000">
+      </div>
+
+      <div class="form-row">
         <div class="form-label">Заметка (необязательно)</div>
         <textarea class="note-input" id="noteInput"
           placeholder="Что делал сегодня? Задачи, встречи…">${existing?.note ?? ''}</textarea>
@@ -999,7 +1041,11 @@ function openEntry(dateStr) {
     const project = projectRaw.startsWith('#') ? projectRaw.slice(1) : projectRaw;
     const note = document.getElementById('noteInput').value.trim();
     const payment = parseFloat(document.getElementById('paymentInput').value) || 0;
+    const salary = parseFloat(document.getElementById('salaryInput').value) || 0;
     await saveEntry(dateStr, hours, note, project, startTime, endTime, payment);
+    if (salary > 0) {
+      await apiSaveIncome(dateStr, salary, '');
+    }
     form.innerHTML = '';
     selectedDate = null;
     renderAll();
@@ -1029,7 +1075,8 @@ function renderLog() {
   me.sort((a,b) => b[0].localeCompare(a[0]));
 
   const list = document.getElementById('logList');
-  if (!me.length) {
+  const monthSal = incomeList.filter(i => i.date.startsWith(`${year}-${String(month+1).padStart(2,'0')}-`));
+  if (!me.length && !monthSal.length) {
     list.innerHTML = `<div class="empty-state">
       <div class="icon">📋</div>
       Нет записей за ${MONTHS_RU[month]} ${year}
@@ -1051,6 +1098,16 @@ function renderLog() {
       <div class="log-note">${entry.note ? escapeHtml(entry.note) : '<span style="color:var(--text-muted)">–</span>'}</div>
     </div>`;
   }).join('');
+
+  for (const item of monthSal) {
+    list.innerHTML += `<div class="log-item" style="border-left:3px solid var(--green)">
+      <div>
+        <div class="log-date">${item.date.split('-')[2]} ${MONTHS_RU[parseInt(item.date.split('-')[1])-1]?.slice(0,3) || ''}</div>
+      </div>
+      <div class="log-hrs" style="color:var(--green)">${item.amount.toLocaleString('ru')}₽</div>
+      <div class="log-note">💼 ${escapeHtml(item.note || 'Зарплата')}</div>
+    </div>`;
+  }
 
   list.querySelectorAll('.log-item').forEach(item => {
     item.onclick = () => {
@@ -1147,6 +1204,9 @@ function renderBudget() {
   const me = monthEntries(year, month);
   const totalHours = me.reduce((s,[,v]) => s + v.hours, 0);
   const totalPayment = me.reduce((s,[,v]) => s + (v.payment || 0), 0);
+  const monthPrefix = `${year}-${String(month+1).padStart(2,'0')}-`;
+  const monthSalary = incomeList.filter(i => i.date.startsWith(monthPrefix)).reduce((s,i) => s + i.amount, 0);
+  const totalAll = totalPayment + monthSalary;
   const paidDays = me.filter(([,v]) => (v.payment || 0) > 0).length;
   const unpaidDays = me.length - paidDays;
 
@@ -1167,7 +1227,15 @@ function renderBudget() {
       </div>
       <div class="stat-card">
         <div class="stat-val">${totalPayment.toLocaleString('ru')}₽</div>
-        <div class="stat-label">Заработано</div>
+        <div class="stat-label">За смены</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${monthSalary.toLocaleString('ru')}₽</div>
+        <div class="stat-label">Зарплата</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${totalAll.toLocaleString('ru')}₽</div>
+        <div class="stat-label">Итого получено</div>
       </div>
       <div class="stat-card">
         <div class="stat-val">${paidDays}</div>
