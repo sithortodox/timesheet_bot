@@ -430,6 +430,8 @@
   }
   .project-input:focus { border-color: var(--accent); }
   .project-input::placeholder { color: var(--text-muted); }
+  .project-input::-webkit-search-cancel-button { display: none; }
+  .project-input::-webkit-search-decoration { display: none; }
 
   .payment-input {
     background: var(--surface2);
@@ -994,7 +996,9 @@ function openEntry(dateStr) {
 
       <div class="form-row">
         <div class="form-label">Проект (необязательно)</div>
-        <input type="text" class="project-input" id="projectInput" inputmode="text" lang="ru"
+        <input type="search" class="project-input" id="projectInput"
+          autocomplete="off" autocapitalize="sentences" autocorrect="off" spellcheck="false"
+          enterkeyhint="done"
           placeholder="Название проекта" value="${existing?.project || ''}">
       </div>
 
@@ -1013,6 +1017,7 @@ function openEntry(dateStr) {
       <div class="form-row">
         <div class="form-label">Заметка (необязательно)</div>
         <textarea class="note-input" id="noteInput"
+          autocomplete="off" autocapitalize="sentences" autocorrect="off" spellcheck="false"
           placeholder="Что делал сегодня? Задачи, встречи…">${existing?.note ?? ''}</textarea>
       </div>
 
@@ -1025,6 +1030,17 @@ function openEntry(dateStr) {
     form.innerHTML = '';
     selectedDate = null;
   };
+
+  ['projectInput','noteInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('focus', () => {
+        const v = el.value;
+        el.value = '';
+        requestAnimationFrame(() => { el.value = v; });
+      });
+    }
+  });
 
   function updateShiftResult() {
     const s = document.getElementById('startTime').value;
