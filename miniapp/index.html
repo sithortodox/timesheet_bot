@@ -433,6 +433,60 @@
   .project-input::-webkit-search-cancel-button { display: none; }
   .project-input::-webkit-search-decoration { display: none; }
 
+  .ru-toggle {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .ru-keyboard {
+    margin-top: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 4px;
+    position: relative;
+  }
+
+  .ru-row {
+    display: flex;
+    justify-content: center;
+    gap: 3px;
+    margin-bottom: 3px;
+  }
+
+  .ru-key {
+    min-width: 26px;
+    height: 30px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ru-key:active { background: var(--accent); color: var(--bg); }
+
+  .ru-key-close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    min-width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
   .payment-input {
     background: var(--surface2);
     border: 1px solid var(--border);
@@ -996,10 +1050,9 @@ function openEntry(dateStr) {
 
       <div class="form-row">
         <div class="form-label">Проект (необязательно)</div>
-        <input type="search" class="project-input" id="projectInput"
-          autocomplete="off" autocapitalize="sentences" autocorrect="off" spellcheck="false"
-          enterkeyhint="done"
+        <input type="text" class="project-input" id="projectInput"
           placeholder="Название проекта" value="${existing?.project || ''}">
+        <div class="ru-toggle" id="ruToggleProject" data-target="projectInput">🌐 RU</div>
       </div>
 
       <div class="form-row">
@@ -1017,8 +1070,8 @@ function openEntry(dateStr) {
       <div class="form-row">
         <div class="form-label">Заметка (необязательно)</div>
         <textarea class="note-input" id="noteInput"
-          autocomplete="off" autocapitalize="sentences" autocorrect="off" spellcheck="false"
           placeholder="Что делал сегодня? Задачи, встречи…">${existing?.note ?? ''}</textarea>
+        <div class="ru-toggle" id="ruToggleNote" data-target="noteInput">🌐 RU</div>
       </div>
 
       <button class="save-btn" id="saveBtn">СОХРАНИТЬ</button>
@@ -1031,15 +1084,50 @@ function openEntry(dateStr) {
     selectedDate = null;
   };
 
-  ['projectInput','noteInput'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.addEventListener('focus', () => {
-        const v = el.value;
-        el.value = '';
-        requestAnimationFrame(() => { el.value = v; });
+  document.querySelectorAll('.ru-toggle').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      const popup = document.getElementById('ruKeyboard');
+      if (popup) { popup.remove(); return; }
+      const kb = document.createElement('div');
+      kb.id = 'ruKeyboard';
+      kb.className = 'ru-keyboard';
+      const rows = [
+        'йцукенгшщзхъ',
+        'фывапролджэ',
+        'ячсмитьбю'
+      ];
+      rows.forEach(row => {
+        const r = document.createElement('div');
+        r.className = 'ru-row';
+        for (const ch of row) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ru-key';
+          b.textContent = ch;
+          const upper = ch.toUpperCase();
+          b.onclick = (ev) => {
+            ev.stopPropagation();
+            const selStart = target.selectionStart;
+            const v = target.value;
+            target.value = v.slice(0, selStart) + upper + v.slice(target.selectionEnd);
+            target.selectionStart = target.selectionEnd = selStart + 1;
+            target.focus();
+          };
+          r.appendChild(b);
+        }
+        kb.appendChild(r);
       });
-    }
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'ru-key ru-key-close';
+      close.textContent = '✕';
+      close.onclick = () => kb.remove();
+      kb.appendChild(close);
+      target.parentNode.appendChild(kb);
+    };
   });
 
   function updateShiftResult() {
