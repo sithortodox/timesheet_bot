@@ -58,6 +58,7 @@ def create_app(config: Config | None = None) -> Application:
     app.add_handler(CommandHandler("projects", handlers.projects))
     app.add_handler(CommandHandler("budget", handlers.budget))
     app.add_handler(CommandHandler("salary", handlers.salary))
+    app.add_handler(CommandHandler("dayoff", handlers.dayoff))
     app.add_handler(CommandHandler("team_stats", handlers.team_stats))
     app.add_handler(CommandHandler("team_export", handlers.team_export))
     app.add_handler(InlineQueryHandler(handlers.handle_inline))
@@ -66,6 +67,9 @@ def create_app(config: Config | None = None) -> Application:
         MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handlers.handle_web_app_data)
     )
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
+    app.add_handler(
+        MessageHandler(filters.PHOTO, handlers.handle_photo)
+    )
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message)
     )

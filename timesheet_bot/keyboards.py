@@ -16,22 +16,25 @@ def main_keyboard(mini_app_url: str, user_id: int | None = None) -> ReplyKeyboar
         [KeyboardButton("📋 Открыть табель", web_app=WebAppInfo(url=url))],
         [
             KeyboardButton("⏱ Записать смену"),
-            KeyboardButton("📊 Статистика"),
+            KeyboardButton("🛌 Выходной"),
         ],
         [
+            KeyboardButton("📊 Статистика"),
             KeyboardButton("📆 Неделя"),
+        ],
+        [
             KeyboardButton("🏷 По проектам"),
+            KeyboardButton("📤 Экспорт"),
         ],
         [
             KeyboardButton("✏️ Редактировать"),
             KeyboardButton("🗑 Удалить"),
         ],
         [
-            KeyboardButton("📤 Экспорт"),
             KeyboardButton("💰 Бюджет"),
+            KeyboardButton("⏰ Напоминания"),
         ],
         [
-            KeyboardButton("⏰ Напоминания"),
             KeyboardButton("❓ Помощь"),
         ],
     ]

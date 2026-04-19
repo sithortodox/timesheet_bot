@@ -16,7 +16,7 @@ class StorageBase(ABC):
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
         project: str = "", start_time: str = "", end_time: str = "",
-        payment: float = 0
+        payment: float = 0, day_type: str = "work"
     ) -> dict: ...
 
     @abstractmethod
@@ -61,6 +61,21 @@ class StorageBase(ABC):
 
     @abstractmethod
     def get_income_total(self, user_id: int, date_from: str = None, date_to: str = None) -> float: ...
+
+    @abstractmethod
+    def save_photo(
+        self, user_id: int, date_str: str, file_name: str,
+        telegram_file_id: str = "", caption: str = ""
+    ) -> dict: ...
+
+    @abstractmethod
+    def get_photos(self, user_id: int, date_str: str) -> list[dict]: ...
+
+    @abstractmethod
+    def get_photo(self, photo_id: int) -> dict | None: ...
+
+    @abstractmethod
+    def delete_photo(self, user_id: int, photo_id: int) -> bool: ...
 
     @abstractmethod
     def set_reminder(
@@ -131,6 +146,7 @@ class SqliteStorage(StorageBase):
                 note TEXT DEFAULT '',
                 project TEXT DEFAULT '',
                 payment REAL DEFAULT 0,
+                day_type TEXT DEFAULT 'work',
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, date)
             );
@@ -168,6 +184,18 @@ class SqliteStorage(StorageBase):
             );
             CREATE INDEX IF NOT EXISTS idx_income_user_date
                 ON income(user_id, date);
+
+            CREATE TABLE IF NOT EXISTS photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                telegram_file_id TEXT DEFAULT '',
+                caption TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_photos_user_date
+                ON photos(user_id, date);
         """
         )
         for col in ("start_time", "end_time"):
@@ -177,6 +205,10 @@ class SqliteStorage(StorageBase):
                 pass
         try:
             conn.execute("ALTER TABLE entries ADD COLUMN payment REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE entries ADD COLUMN day_type TEXT DEFAULT 'work'")
         except sqlite3.OperationalError:
             pass
         conn.commit()
@@ -212,21 +244,21 @@ class SqliteStorage(StorageBase):
     def save_entry(
         self, user_id: int, date_str: str, hours: float, note: str = "",
         project: str = "", start_time: str = "", end_time: str = "",
-        payment: float = 0
+        payment: float = 0, day_type: str = "work"
     ) -> dict:
         updated_at = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute(
             """
-            INSERT INTO entries (user_id, date, hours, start_time, end_time, note, project, payment, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (user_id, date, hours, start_time, end_time, note, project, payment, day_type, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, date) DO UPDATE SET
                 hours=excluded.hours, start_time=excluded.start_time,
                 end_time=excluded.end_time, note=excluded.note,
                 project=excluded.project, payment=excluded.payment,
-                updated_at=excluded.updated_at
+                day_type=excluded.day_type, updated_at=excluded.updated_at
             """,
-            (user_id, date_str, hours, start_time, end_time, note, project, payment, updated_at),
+            (user_id, date_str, hours, start_time, end_time, note, project, payment, day_type, updated_at),
         )
         conn.commit()
         return {
@@ -238,6 +270,7 @@ class SqliteStorage(StorageBase):
             "note": note,
             "project": project,
             "payment": payment,
+            "day_type": day_type,
             "updated_at": updated_at,
         }
 
@@ -418,6 +451,51 @@ class SqliteStorage(StorageBase):
             params.append(date_to)
         row = conn.execute(query, params).fetchone()
         return row["total"]
+
+    def save_photo(
+        self, user_id: int, date_str: str, file_name: str,
+        telegram_file_id: str = "", caption: str = ""
+    ) -> dict:
+        created_at = datetime.now().isoformat()
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO photos (user_id, date, file_name, telegram_file_id, caption, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, date_str, file_name, telegram_file_id, caption, created_at),
+        )
+        conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "user_id": user_id,
+            "date": date_str,
+            "file_name": file_name,
+            "telegram_file_id": telegram_file_id,
+            "caption": caption,
+            "created_at": created_at,
+        }
+
+    def get_photos(self, user_id: int, date_str: str) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM photos WHERE user_id = ? AND date = ? ORDER BY created_at",
+            (user_id, date_str),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_photo(self, photo_id: int) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def delete_photo(self, user_id: int, photo_id: int) -> bool:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM photos WHERE id = ? AND user_id = ?",
+            (photo_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def get_projects(self, user_id: int) -> list[str]:
         conn = self._get_conn()

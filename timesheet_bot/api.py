@@ -4,7 +4,9 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
+import uuid
 from aiohttp import web
 
 from .storage import StorageBase
@@ -56,7 +58,7 @@ class WebAppAPI:
     def __init__(self, storage: StorageBase, bot_token: str) -> None:
         self.storage = storage
         self.bot_token = bot_token
-        self.app = web.Application(client_max_size=2 * 1024 * 1024)
+        self.app = web.Application(client_max_size=10 * 1024 * 1024)
         self.app.add_routes([
             web.get("/api/entries", self.get_entries),
             web.post("/api/entry", self.save_entry),
@@ -64,6 +66,11 @@ class WebAppAPI:
             web.get("/api/income", self.get_income),
             web.post("/api/income", self.save_income),
             web.delete("/api/income", self.delete_income),
+            web.get("/api/photos", self.get_photos),
+            web.post("/api/photos", self.upload_photo),
+            web.delete("/api/photos", self.delete_photo),
+            web.get("/api/photo/{photo_id}", self.serve_photo),
+            web.get("/api/projects", self.get_projects),
             web.get("/api/health", self.health),
         ])
 
@@ -105,6 +112,7 @@ class WebAppAPI:
                 "note": e.get("note", ""),
                 "project": e.get("project", ""),
                 "payment": e.get("payment", 0),
+                "day_type": e.get("day_type", "work"),
                 "updated_at": e.get("updated_at", ""),
             }
 
@@ -144,10 +152,13 @@ class WebAppAPI:
             return web.json_response({"error": "hours must be 0.5-24"}, status=400)
 
         note = body.get("note", "")
-        project = body.get("project", "")
+        project = body.get("project", "").lower()
         payment = float(body.get("payment", 0))
+        day_type = body.get("day_type", "work")
+        if day_type not in ("work", "dayoff"):
+            day_type = "work"
 
-        entry = self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
+        entry = self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment, day_type)
         logger.info(f"API save_entry: user={user_id} date={date_str} hours={hours}")
         return web.json_response({"ok": True, "entry": entry})
 
@@ -215,3 +226,110 @@ class WebAppAPI:
             return web.json_response({"error": "id required"}, status=400)
         deleted = self.storage.delete_income(user_id, int(income_id))
         return web.json_response({"ok": deleted})
+
+    async def get_photos(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        date_str = request.query.get("date")
+        if not date_str:
+            return web.json_response({"error": "date required"}, status=400)
+        photos = self.storage.get_photos(user_id, date_str)
+        for p in photos:
+            p["url"] = f"/api/photo/{p['id']}"
+        return web.json_response(photos)
+
+    async def upload_photo(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return web.json_response({"error": "multipart required"}, status=400)
+
+        date_str = None
+        caption = ""
+        file_data = None
+        file_name = None
+
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == "date":
+                date_str = (await part.text()).strip()
+            elif part.name == "caption":
+                caption = (await part.text()).strip()
+            elif part.name == "file":
+                file_data = await part.read()
+                fn = part.filename or "photo.jpg"
+                ext = os.path.splitext(fn)[1] or ".jpg"
+                file_name = f"{uuid.uuid4().hex}{ext}"
+
+        if not date_str or not file_data:
+            return web.json_response({"error": "date and file required"}, status=400)
+
+        if len(file_data) > 10 * 1024 * 1024:
+            return web.json_response({"error": "file too large (max 10MB)"}, status=400)
+
+        photo_dir = os.path.join("/app/data/photos", str(user_id), date_str)
+        os.makedirs(photo_dir, exist_ok=True)
+        file_path = os.path.join(photo_dir, file_name)
+        with open(file_path, "wb") as f:
+            f.write(file_data)
+
+        result = self.storage.save_photo(user_id, date_str, file_name, caption=caption)
+        result["url"] = f"/api/photo/{result['id']}"
+        logger.info(f"API upload_photo: user={user_id} date={date_str} file={file_name}")
+        return web.json_response({"ok": True, "photo": result})
+
+    async def delete_photo(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        photo_id = body.get("id")
+        if photo_id is None:
+            return web.json_response({"error": "id required"}, status=400)
+        photo = self.storage.get_photo(int(photo_id))
+        if not photo or photo["user_id"] != user_id:
+            return web.json_response({"error": "not found"}, status=404)
+        deleted = self.storage.delete_photo(user_id, int(photo_id))
+        if deleted:
+            file_path = os.path.join("/app/data/photos", str(user_id), photo["date"], photo["file_name"])
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        return web.json_response({"ok": deleted})
+
+    async def serve_photo(self, request: web.Request) -> web.Response:
+        photo_id = int(request.match_info["photo_id"])
+        photo = self.storage.get_photo(photo_id)
+        if not photo:
+            return web.json_response({"error": "not found"}, status=404)
+        user_id = self._get_user_id(request)
+        if user_id is None or photo["user_id"] != user_id:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        file_path = os.path.join("/app/data/photos", str(photo["user_id"]), photo["date"], photo["file_name"])
+        if not os.path.exists(file_path):
+            return web.json_response({"error": "file not found"}, status=404)
+        ext = os.path.splitext(photo["file_name"])[1].lower()
+        content_types = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".gif": "image/gif",
+            ".webp": "image/webp",
+        }
+        ct = content_types.get(ext, "application/octet-stream")
+        return web.FileResponse(file_path, headers={"Content-Type": ct})
+
+    async def get_projects(self, request: web.Request) -> web.Response:
+        user_id = self._get_user_id(request)
+        if user_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        projects = self.storage.get_projects(user_id)
+        return web.json_response(projects)

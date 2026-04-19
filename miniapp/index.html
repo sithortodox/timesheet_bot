@@ -177,6 +177,7 @@
   .cal-day.empty { background: transparent; border-color: transparent; cursor: default; }
   .cal-day.today { border-color: var(--accent); }
   .cal-day.has-entry { background: var(--surface2); }
+  .cal-day.has-dayoff { background: rgba(107,114,128,0.15); }
   .cal-day.has-entry::after {
     content: '';
     position: absolute;
@@ -368,6 +369,53 @@
     transition: all 0.15s;
   }
   .delete-btn:active { background: rgba(255,77,77,0.1); }
+
+  .dayoff-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 10px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: all 0.15s;
+  }
+  .dayoff-btn:active { background: rgba(107,114,128,0.15); color: var(--text); }
+
+  .photo-thumb {
+    width: 72px; height: 72px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .photo-thumb:active { transform: scale(0.95); }
+
+  .photo-upload-btn {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .photo-upload-btn:active { background: var(--accent); color: #fff; }
+
+  .photo-overlay {
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,0.9);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    cursor: pointer;
+  }
+  .photo-overlay img { max-width: 95vw; max-height: 90vh; border-radius: 8px; }
 
   /* ── Shift picker ── */
   .shift-picker {
@@ -763,6 +811,7 @@ function escapeHtml(str) {
 let currentMonth;
 let entries = {};
 let incomeList = [];
+let projectList = [];
 let selectedDate = null;
 let currentTab = 'calendar';
 let resolvedUserId = null;
@@ -825,12 +874,12 @@ async function apiGetEntries() {
   } catch { return null; }
 }
 
-async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
+async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment, dayType) {
   try {
     const resp = await fetch(`${API_BASE}/entry`, {
       method: 'POST',
       headers: apiHeaders(),
-      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0})
+      body: JSON.stringify({date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0, day_type: dayType || 'work'})
     });
     return resp.ok;
   } catch { return false; }
@@ -864,6 +913,47 @@ async function apiSaveIncome(dateStr, amount, note) {
     });
     return resp.ok;
   } catch { return false; }
+}
+
+async function apiGetPhotos(dateStr) {
+  try {
+    const resp = await fetch(`${API_BASE}/photos?${apiAuthQuery()}&date=${dateStr}`, {headers: apiHeaders()});
+    if (!resp.ok) return [];
+    return await resp.json();
+  } catch { return []; }
+}
+
+async function apiUploadPhoto(dateStr, file, caption) {
+  try {
+    const fd = new FormData();
+    fd.append('date', dateStr);
+    fd.append('file', file);
+    if (caption) fd.append('caption', caption);
+    const h = {};
+    const uid = getTelegramUserId();
+    if (uid) h['X-Telegram-User-Id'] = String(uid);
+    const resp = await fetch(`${API_BASE}/photos?${apiAuthQuery()}`, {method: 'POST', headers: h, body: fd});
+    return resp.ok ? await resp.json() : null;
+  } catch { return null; }
+}
+
+async function apiDeletePhoto(photoId) {
+  try {
+    const resp = await fetch(`${API_BASE}/photos`, {
+      method: 'DELETE',
+      headers: apiHeaders(),
+      body: JSON.stringify({id: photoId})
+    });
+    return resp.ok;
+  } catch { return false; }
+}
+
+async function apiGetProjects() {
+  try {
+    const resp = await fetch(`${API_BASE}/projects?${apiAuthQuery()}`, {headers: apiHeaders()});
+    if (!resp.ok) return [];
+    return await resp.json();
+  } catch { return []; }
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -911,14 +1001,16 @@ async function loadEntries() {
   } else {
     loadIncomeLocal();
   }
+  const apiProjects = await apiGetProjects();
+  if (apiProjects && apiProjects.length > 0) projectList = apiProjects;
 }
 
-async function saveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
-  entries[dateStr] = { hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0, updated_at: new Date().toISOString() };
+async function saveEntry(dateStr, hours, note, project, startTime, endTime, payment, dayType) {
+  entries[dateStr] = { hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0, day_type: dayType || 'work', updated_at: new Date().toISOString() };
   saveEntriesLocal();
-  await apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment);
+  await apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment, dayType);
   if (tg?.sendData) {
-    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0}));
+    tg.sendData(JSON.stringify({action: 'save_entry', date: dateStr, hours, note: note || '', project: project || '', start_time: startTime || '', end_time: endTime || '', payment: payment || 0, day_type: dayType || 'work'}));
   }
 }
 
@@ -995,6 +1087,7 @@ function renderCalendar() {
     const el = document.createElement('div');
     let cls = 'cal-day';
     if (entry) cls += ' has-entry';
+    if (entry?.day_type === 'dayoff') cls += ' has-dayoff';
     if (isToday) cls += ' today';
     if (isFuture) cls += ' future';
     if (isWeekend) cls += ' weekend';
@@ -1008,9 +1101,14 @@ function renderCalendar() {
     if (entry) {
       const hrs = document.createElement('div');
       hrs.className = 'day-hrs';
-      let label = (entry.hours % 1 === 0 ? entry.hours : entry.hours.toFixed(1)) + 'ч';
-      if (entry.payment > 0) label += ' 💰';
-      hrs.textContent = label;
+      if (entry.day_type === 'dayoff') {
+        hrs.textContent = '🛌';
+        hrs.style.fontSize = '10px';
+      } else {
+        let label = (entry.hours % 1 === 0 ? entry.hours : entry.hours.toFixed(1)) + 'ч';
+        if (entry.payment > 0) label += ' 💰';
+        hrs.textContent = label;
+      }
       el.appendChild(hrs);
     }
 
@@ -1078,8 +1176,11 @@ function openEntry(dateStr) {
 
       <div class="form-row">
         <div class="form-label">Проект (необязательно)</div>
-        <input type="text" class="project-input" id="projectInput"
-          placeholder="Название проекта" value="${existing?.project || ''}">
+        <input type="text" class="project-input" id="projectInput" list="projectDatalist"
+          placeholder="Выбрать или ввести" value="${existing?.project || ''}">
+        <datalist id="projectDatalist">
+          ${projectList.map(p => `<option value="${escapeHtml(p)}">`).join('')}
+        </datalist>
         <div class="ru-toggle" id="ruToggleProject" data-target="projectInput">🌐 RU</div>
       </div>
 
@@ -1102,7 +1203,17 @@ function openEntry(dateStr) {
         <div class="ru-toggle" id="ruToggleNote" data-target="noteInput">🌐 RU</div>
       </div>
 
+      <div class="form-row">
+        <div class="form-label">Фотоотчет</div>
+        <div id="photoGallery" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+        <label class="photo-upload-btn">
+          📷 Добавить фото
+          <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+        </label>
+      </div>
+
       <button class="save-btn" id="saveBtn">СОХРАНИТЬ</button>
+      <button class="dayoff-btn" id="dayoffBtn">🛌 Отметить выходной</button>
       ${existing ? `<button class="delete-btn" id="delBtn">🗑 Удалить запись</button>` : ''}
     </div>
   `;
@@ -1177,11 +1288,11 @@ function openEntry(dateStr) {
     const hours = calcHours(startTime, endTime);
     if (!hours) { showToast('Укажи правильное время'); return; }
     const projectRaw = document.getElementById('projectInput').value.trim();
-    const project = projectRaw.startsWith('#') ? projectRaw.slice(1) : projectRaw;
+    const project = (projectRaw.startsWith('#') ? projectRaw.slice(1) : projectRaw).toLowerCase();
     const note = document.getElementById('noteInput').value.trim();
     const payment = parseFloat(document.getElementById('paymentInput').value) || 0;
     const salary = parseFloat(document.getElementById('salaryInput').value) || 0;
-    await saveEntry(dateStr, hours, note, project, startTime, endTime, payment);
+    await saveEntry(dateStr, hours, note, project, startTime, endTime, payment, 'work');
     if (salary > 0) {
       const res = await apiSaveIncome(dateStr, salary, '');
       incomeList.push({date: dateStr, amount: salary, note: ''});
@@ -1198,6 +1309,15 @@ function openEntry(dateStr) {
     if (tg) tg.HapticFeedback?.notificationOccurred('success');
   };
 
+  document.getElementById('dayoffBtn').onclick = async () => {
+    await saveEntry(dateStr, 0, '', '', '', '', 0, 'dayoff');
+    form.innerHTML = '';
+    selectedDate = null;
+    renderAll();
+    showToast('🛌 Выходной!');
+    if (tg) tg.HapticFeedback?.notificationOccurred('success');
+  };
+
   const delBtn = document.getElementById('delBtn');
   if (delBtn) {
     delBtn.onclick = async () => {
@@ -1208,6 +1328,56 @@ function openEntry(dateStr) {
       showToast('Запись удалена');
     };
   }
+
+  (async () => {
+    const photos = await apiGetPhotos(dateStr);
+    const gallery = document.getElementById('photoGallery');
+    if (gallery && photos.length) {
+      photos.forEach(p => {
+        const img = document.createElement('img');
+        img.className = 'photo-thumb';
+        img.src = p.url + '?' + apiAuthQuery();
+        img.onclick = () => {
+          const overlay = document.createElement('div');
+          overlay.className = 'photo-overlay';
+          const full = document.createElement('img');
+          full.src = p.url + '?' + apiAuthQuery();
+          overlay.appendChild(full);
+          overlay.onclick = () => overlay.remove();
+          document.body.appendChild(overlay);
+        };
+        gallery.appendChild(img);
+      });
+    }
+  })();
+
+  document.getElementById('photoInput').onchange = async (e) => {
+    const files = e.target.files;
+    if (!files.length) return;
+    for (const file of files) {
+      const res = await apiUploadPhoto(dateStr, file, '');
+      if (res && res.ok) {
+        const gallery = document.getElementById('photoGallery');
+        const img = document.createElement('img');
+        img.className = 'photo-thumb';
+        img.src = res.photo.url + '?' + apiAuthQuery();
+        img.onclick = () => {
+          const overlay = document.createElement('div');
+          overlay.className = 'photo-overlay';
+          const full = document.createElement('img');
+          full.src = res.photo.url + '?' + apiAuthQuery();
+          overlay.appendChild(full);
+          overlay.onclick = () => overlay.remove();
+          document.body.appendChild(overlay);
+        };
+        gallery.appendChild(img);
+        showToast('📷 Фото добавлено');
+      } else {
+        showToast('Ошибка загрузки фото');
+      }
+    }
+    e.target.value = '';
+  };
 
   // Scroll form into view
   setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
@@ -1233,14 +1403,15 @@ function renderLog() {
   list.innerHTML = me.map(([dateStr, entry]) => {
     const [y,m,d] = dateStr.split('-').map(Number);
     const dn = dayNames[new Date(y,m-1,d).getDay()];
-    return `<div class="log-item" data-date="${dateStr}">
+    const isDayoff = entry.day_type === 'dayoff';
+    return `<div class="log-item" data-date="${dateStr}" ${isDayoff ? 'style="border-left:3px solid var(--text-muted)"' : ''}>
       <div>
         <div class="log-date">${d} ${MONTHS_RU[m-1].slice(0,3)}</div>
         <div class="log-date" style="color:var(--text-muted)">${dn}</div>
       </div>
-      <div class="log-hrs">${entry.hours}<span>ч</span></div>
-      ${entry.payment > 0 ? `<div class="log-hrs" style="color:var(--orange)">${entry.payment.toLocaleString('ru')}₽</div>` : ''}
-      <div class="log-note">${entry.note ? escapeHtml(entry.note) : '<span style="color:var(--text-muted)">–</span>'}</div>
+      ${isDayoff ? '<div class="log-hrs">🛌</div>' : `<div class="log-hrs">${entry.hours}<span>ч</span></div>`}
+      ${!isDayoff && entry.payment > 0 ? `<div class="log-hrs" style="color:var(--orange)">${entry.payment.toLocaleString('ru')}₽</div>` : ''}
+      <div class="log-note">${isDayoff ? 'Выходной' : (entry.note ? escapeHtml(entry.note) : '<span style="color:var(--text-muted)">–</span>')}</div>
     </div>`;
   }).join('');
 

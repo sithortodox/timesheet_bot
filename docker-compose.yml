@@ -13,6 +13,7 @@ services:
       - HTTPS_PROXY=${HTTPS_PROXY:-}
     volumes:
       - bot_data:/app/data
+      - photo_data:/app/data/photos
     ports:
       - "127.0.0.1:8081:8081"
     healthcheck:
@@ -64,3 +65,4 @@ services:
 
 volumes:
   bot_data:
+  photo_data:

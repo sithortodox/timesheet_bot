@@ -31,7 +31,7 @@ def parse_shift_time(start_str: str, end_str: str) -> float | None:
 def parse_project(text: str) -> tuple[str, str]:
     m = re.match(r"#(\S+)", text)
     if m:
-        project = m.group(1)
+        project = m.group(1).lower()
         note = text[m.end():].strip()
         return project, note
     return "", text

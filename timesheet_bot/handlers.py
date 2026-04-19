@@ -73,7 +73,9 @@ class Handlers:
             "• `09:00 18:00 2025-04-10` — за конкретную дату\n"
             "• `09:00 18:00 2025-04-10 #design Прототип` — всё вместе\n\n"
             "💼 */salary 50000* — записать получение зарплаты\n"
-            "💼 */salary 30000 2026-04-15 Аванс* — за дату с заметкой\n\n"
+            "💼 */salary 30000 2026-04-15 Аванс* — за дату с заметкой\n"
+            "🛌 */dayoff* — отметить сегодня как выходной\n"
+            "🛌 */dayoff 2026-04-20* — выходной за конкретную дату\n\n"
             "📋 *Открыть табель* — полный интерфейс с календарём\n"
             "📊 *Статистика* — итоги за месяц + по проектам\n"
             "📆 *Неделя* — итоги за текущую/прошлую неделю\n"
@@ -264,13 +266,30 @@ class Handlers:
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+    async def dayoff(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        args = context.args or []
+        date_str = date_type.today().isoformat()
+        if args:
+            try:
+                datetime.strptime(args[0], "%Y-%m-%d")
+                date_str = args[0]
+            except ValueError:
+                await update.message.reply_text("❌ Формат даты: ГГГГ-ММ-ДД\nПример: `/dayoff 2026-04-20`", parse_mode="Markdown")
+                return
+        self.storage.save_entry(user_id, date_str, 0, "", "", "", "", 0, day_type="dayoff")
+        await update.message.reply_text(
+            f"🛌 *Выходной отмечен!*\n📅 Дата: *{date_str}*",
+            parse_mode="Markdown",
+        )
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         if _rate_limiter.is_limited(user_id):
             await update.message.reply_text("⏳ Слишком много запросов. Подожди немного.")
             return
 
-        text = update.message.text.strip()
+        text = (update.message.text or "").strip()
 
         if context.user_data.get("edit_mode"):
             return await self._handle_edit_input(update, context)
@@ -304,6 +323,9 @@ class Handlers:
             return await self._show_reminder_settings(update, context)
         if text == "💰 Бюджет":
             return await self.budget(update, context)
+        if text == "🛌 Выходной":
+            context.args = []
+            return await self.dayoff(update, context)
 
         parts = text.split(maxsplit=3)
         if len(parts) < 2:
@@ -334,7 +356,7 @@ class Handlers:
             except ValueError:
                 project, note = parse_project(rest)
 
-        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment, "work")
 
         pay_text = f"\n💵 Оплата: _{format_money(payment)}_" if payment > 0 else ""
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
@@ -420,9 +442,12 @@ class Handlers:
                 end_time = payload.get("end_time", "")
                 hours = parse_shift_time(start_time, end_time) if start_time and end_time else float(payload.get("hours", 0))
                 note = payload.get("note", "")
-                project = payload.get("project", "")
+                project = payload.get("project", "").lower()
                 payment = float(payload.get("payment", 0))
-                self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
+                day_type = payload.get("day_type", "work")
+                if day_type not in ("work", "dayoff"):
+                    day_type = "work"
+                self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment, day_type)
                 shift = f" ({start_time}-{end_time})" if start_time and end_time else ""
                 proj = f" #{project}" if project else ""
                 await update.message.reply_text(
@@ -443,6 +468,40 @@ class Handlers:
                 )
         except Exception as e:
             logger.error(f"Web app data error: {e}")
+
+    async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        caption = update.message.caption or ""
+        date_str = date_type.today().isoformat()
+
+        try:
+            import re
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", caption)
+            if date_match:
+                date_str = date_match.group(1)
+
+            photo = update.message.photo[-1]
+            file = await photo.get_file()
+
+            import os
+            photo_dir = os.path.join("/app/data/photos", str(user_id), date_str)
+            os.makedirs(photo_dir, exist_ok=True)
+
+            import uuid
+            ext = ".jpg"
+            file_name = f"{uuid.uuid4().hex}{ext}"
+            file_path = os.path.join(photo_dir, file_name)
+            await file.download_to_drive(file_path)
+
+            note = caption.strip()
+            self.storage.save_photo(user_id, date_str, file_name, telegram_file_id=file.file_id, caption=note)
+            await update.message.reply_text(
+                f"📷 Фото сохранено!\n📅 Дата: *{date_str}*",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Photo handler error: {e}")
+            await update.message.reply_text("❌ Ошибка сохранения фото.")
 
     async def handle_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.inline_query
@@ -626,7 +685,7 @@ class Handlers:
             rest = " ".join(parts[2:])
             payment, rest = parse_payment(rest)
             project, note = parse_project(rest)
-        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment)
+        self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, payment, "work")
 
         pay_text = f"\n💵 Оплата: _{format_money(payment)}_" if payment > 0 else ""
         proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
