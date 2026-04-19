@@ -410,12 +410,6 @@
     text-align: center;
   }
 
-  .quick-shifts {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
   .project-input {
     width: 100%;
     background: var(--surface2);
@@ -1076,25 +1070,6 @@ function openEntry(dateStr) {
             <input type="time" class="time-input" id="endTime" value="${defEnd}">
           </div>
           <div class="shift-result" id="shiftResult">${defHours}ч</div>
-          <div class="quick-shifts">
-            ${[
-              ['08:00','17:00','8ч'],
-              ['08:00','16:00','8ч'],
-              ['08:00','18:00','10ч'],
-              ['08:00','20:00','12ч'],
-              ['09:00','18:00','9ч'],
-              ['09:00','17:00','8ч'],
-              ['09:00','19:00','10ч'],
-              ['09:00','20:00','11ч'],
-              ['10:00','19:00','9ч'],
-              ['10:00','18:00','8ч'],
-              ['10:00','20:00','10ч'],
-              ['12:00','20:00','8ч'],
-            ].map(([s,e,l]) =>
-              `<button class="qh-btn${s===defStart&&e===defEnd?' active':''}" data-s="${s}" data-e="${e}">${s}–${e}</button>`
-            ).join('')}
-          </div>
-          <div class="form-label" style="margin-top:8px;font-size:11px;color:var(--text-muted)">или укажи своё время:</div>
         </div>
       </div>
 
@@ -1192,13 +1167,6 @@ function openEntry(dateStr) {
 
   document.getElementById('startTime').oninput = updateShiftResult;
   document.getElementById('endTime').oninput = updateShiftResult;
-  form.querySelectorAll('.qh-btn').forEach(b => {
-    b.onclick = () => {
-      document.getElementById('startTime').value = b.dataset.s;
-      document.getElementById('endTime').value = b.dataset.e;
-      updateShiftResult();
-    };
-  });
 
   document.getElementById('saveBtn').onclick = async () => {
     const startTime = document.getElementById('startTime').value;
