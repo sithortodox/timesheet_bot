@@ -61,7 +61,7 @@ class Handlers:
             "`09:00 18:00 #backend Работал над API` — с проектом\n"
             "`09:00 18:00 $5000 #backend` — с оплатой и проектом\n"            "`09:00 18:00 2025-04-10 #design Встречи` — дата + проект + заметка",
             parse_mode="Markdown",
-            reply_markup=main_keyboard(self.config.mini_app_url),
+            reply_markup=main_keyboard(self.config.mini_app_url, user_id=update.effective_user.id),
         )
 
     async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

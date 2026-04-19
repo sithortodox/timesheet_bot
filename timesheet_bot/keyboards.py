@@ -7,9 +7,13 @@ from telegram import (
 )
 
 
-def main_keyboard(mini_app_url: str) -> ReplyKeyboardMarkup:
+def main_keyboard(mini_app_url: str, user_id: int | None = None) -> ReplyKeyboardMarkup:
+    url = mini_app_url
+    if user_id:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}uid={user_id}"
     keyboard = [
-        [KeyboardButton("📋 Открыть табель", web_app=WebAppInfo(url=mini_app_url))],
+        [KeyboardButton("📋 Открыть табель", web_app=WebAppInfo(url=url))],
         [
             KeyboardButton("⏱ Записать смену"),
             KeyboardButton("📊 Статистика"),

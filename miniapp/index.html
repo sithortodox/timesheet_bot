@@ -776,6 +776,9 @@ const API_BASE = window.location.origin + '/api';
 
 function getTelegramUserId() {
   if (resolvedUserId) return resolvedUserId;
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlUid = urlParams.get('uid');
+  if (urlUid) { resolvedUserId = parseInt(urlUid); localStorage.setItem('tg_user_id', String(resolvedUserId)); return resolvedUserId; }
   if (tg?.initDataUnsafe?.user?.id) { resolvedUserId = tg.initDataUnsafe.user.id; return resolvedUserId; }
   if (tg?.initData) {
     try {
