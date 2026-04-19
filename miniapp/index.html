@@ -8,19 +8,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d0d0d;
-    --surface: #161616;
-    --surface2: #1f1f1f;
-    --border: #2a2a2a;
-    --accent: #c8ff00;
-    --accent-dim: #8fb300;
-    --text: #f0f0f0;
-    --text-muted: #666;
-    --text-dim: #999;
-    --red: #ff4d4d;
-    --orange: #ff8c00;
-    --green: #4caf50;
-    --radius: 12px;
+    --bg: #0f1117;
+    --surface: #181b24;
+    --surface2: #222632;
+    --border: #2d3142;
+    --accent: #5b8def;
+    --accent-dim: #3a6bc5;
+    --text: #e4e7ed;
+    --text-muted: #6b7280;
+    --text-dim: #9ca3af;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --green: #34d399;
+    --radius: 10px;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -134,7 +134,7 @@
   .tab.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #000;
+    color: #fff;
     font-weight: 500;
   }
 
@@ -318,7 +318,7 @@
   .qh-btn:active, .qh-btn.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #000;
+    color: #fff;
   }
 
   .note-input {
@@ -343,7 +343,7 @@
     background: var(--accent);
     border: none;
     border-radius: 8px;
-    color: #000;
+    color: #fff;
     font-family: 'Unbounded', sans-serif;
     font-size: 13px;
     font-weight: 800;
@@ -754,8 +754,8 @@ const tg = window.Telegram?.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
-  tg.setHeaderColor('#0d0d0d');
-  tg.setBackgroundColor('#0d0d0d');
+  tg.setHeaderColor('#0f1117');
+  tg.setBackgroundColor('#0f1117');
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1509,13 +1509,13 @@ async function init() {
   renderAll();
 
   if (tg?.colorScheme === 'light') {
-    document.documentElement.style.setProperty('--bg', '#f5f5f5');
+    document.documentElement.style.setProperty('--bg', '#f3f4f6');
     document.documentElement.style.setProperty('--surface', '#ffffff');
-    document.documentElement.style.setProperty('--surface2', '#ebebeb');
-    document.documentElement.style.setProperty('--border', '#ddd');
-    document.documentElement.style.setProperty('--text', '#111');
-    document.documentElement.style.setProperty('--text-muted', '#888');
-    document.documentElement.style.setProperty('--text-dim', '#555');
+    document.documentElement.style.setProperty('--surface2', '#e5e7eb');
+    document.documentElement.style.setProperty('--border', '#d1d5db');
+    document.documentElement.style.setProperty('--text', '#1f2937');
+    document.documentElement.style.setProperty('--text-muted', '#6b7280');
+    document.documentElement.style.setProperty('--text-dim', '#374151');
   }
 }
 
