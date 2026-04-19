@@ -771,6 +771,7 @@ let entries = {};
 let incomeList = [];
 let selectedDate = null;
 let currentTab = 'calendar';
+let resolvedUserId = null;
 
 const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь',
                    'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -780,14 +781,17 @@ const DAYS_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 const API_BASE = window.location.origin + '/api';
 
 function getTelegramUserId() {
-  if (tg?.initDataUnsafe?.user?.id) return tg.initDataUnsafe.user.id;
+  if (resolvedUserId) return resolvedUserId;
+  if (tg?.initDataUnsafe?.user?.id) { resolvedUserId = tg.initDataUnsafe.user.id; return resolvedUserId; }
   if (tg?.initData) {
     try {
       const params = new URLSearchParams(tg.initData);
       const userJson = params.get('user');
-      if (userJson) return JSON.parse(userJson).id;
+      if (userJson) { resolvedUserId = JSON.parse(userJson).id; return resolvedUserId; }
     } catch {}
   }
+  const stored = localStorage.getItem('tg_user_id');
+  if (stored) { resolvedUserId = parseInt(stored); return resolvedUserId; }
   return null;
 }
 
@@ -796,6 +800,10 @@ function apiAuthQuery() {
   if (tg?.initData) params.set('init_data', tg.initData);
   const uid = getTelegramUserId();
   if (uid) params.set('user_id', String(uid));
+  if (!uid) {
+    const stored = localStorage.getItem('tg_user_id');
+    if (stored) params.set('user_id', stored);
+  }
   return params.toString();
 }
 
@@ -803,7 +811,12 @@ function apiHeaders() {
   const h = {'Content-Type': 'application/json'};
   if (tg?.initData) h['X-Telegram-Init-Data'] = tg.initData;
   const uid = getTelegramUserId();
-  if (uid) h['X-Telegram-User-Id'] = String(uid);
+  if (uid) {
+    h['X-Telegram-User-Id'] = String(uid);
+    localStorage.setItem('tg_user_id', String(uid));
+  }
+  const stored = localStorage.getItem('tg_user_id');
+  if (stored && !uid) h['X-Telegram-User-Id'] = stored;
   return h;
 }
 
@@ -1481,6 +1494,16 @@ document.getElementById('nextMonth').onclick = () => {
 async function init() {
   const now = new Date();
   currentMonth = { year: now.getFullYear(), month: now.getMonth() };
+
+  const uid = getTelegramUserId();
+  if (!uid) {
+    const input = prompt('Введи свой Telegram ID (число).\nЕго можно узнать у @userinfobot):');
+    if (input && /^\d+$/.test(input.trim())) {
+      resolvedUserId = parseInt(input.trim());
+      localStorage.setItem('tg_user_id', String(resolvedUserId));
+    }
+  }
+
   await loadEntries();
   updateTodayBar();
   renderAll();
