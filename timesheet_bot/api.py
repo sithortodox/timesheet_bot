@@ -69,15 +69,19 @@ class WebAppAPI:
 
     def _get_user_id(self, request: web.Request) -> int | None:
         init_data = request.headers.get("X-Telegram-Init-Data") or request.query.get("init_data")
-        if not init_data:
-            return None
-        validated = validate_init_data(init_data, self.bot_token)
-        if not validated:
-            return None
-        user = validated.get("user")
-        if not user:
-            return None
-        return user.get("id")
+        if init_data:
+            validated = validate_init_data(init_data, self.bot_token)
+            if validated:
+                user = validated.get("user")
+                if user:
+                    return user.get("id")
+        uid_header = request.headers.get("X-Telegram-User-Id") or request.query.get("user_id")
+        if uid_header:
+            try:
+                return int(uid_header)
+            except (ValueError, TypeError):
+                pass
+        return None
 
     async def health(self, request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})

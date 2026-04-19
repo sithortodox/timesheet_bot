@@ -782,20 +782,26 @@ const API_BASE = window.location.origin + '/api';
 function apiHeaders() {
   const h = {'Content-Type': 'application/json'};
   if (tg?.initData) h['X-Telegram-Init-Data'] = tg.initData;
+  if (tg?.initDataUnsafe?.user?.id) h['X-Telegram-User-Id'] = String(tg.initDataUnsafe.user.id);
   return h;
 }
 
+function apiAuthQuery() {
+  const params = new URLSearchParams();
+  if (tg?.initData) params.set('init_data', tg.initData);
+  if (tg?.initDataUnsafe?.user?.id) params.set('user_id', String(tg.initDataUnsafe.user.id));
+  return params.toString();
+}
+
 async function apiGetEntries() {
-  if (!tg?.initData) return null;
   try {
-    const resp = await fetch(`${API_BASE}/entries`, {headers: apiHeaders()});
+    const resp = await fetch(`${API_BASE}/entries?${apiAuthQuery()}`, {headers: apiHeaders()});
     if (!resp.ok) return null;
     return await resp.json();
   } catch { return null; }
 }
 
 async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
-  if (!tg?.initData) return false;
   try {
     const resp = await fetch(`${API_BASE}/entry`, {
       method: 'POST',
@@ -807,7 +813,6 @@ async function apiSaveEntry(dateStr, hours, note, project, startTime, endTime, p
 }
 
 async function apiDeleteEntry(dateStr) {
-  if (!tg?.initData) return false;
   try {
     const resp = await fetch(`${API_BASE}/entry`, {
       method: 'DELETE',
@@ -819,31 +824,22 @@ async function apiDeleteEntry(dateStr) {
 }
 
 async function apiGetIncome() {
-  if (tg?.initData) {
-    try {
-      const resp = await fetch(`${API_BASE}/income`, {headers: apiHeaders()});
-      if (resp.ok) return await resp.json();
-    } catch {}
-  }
-  return null;
+  try {
+    const resp = await fetch(`${API_BASE}/income?${apiAuthQuery()}`, {headers: apiHeaders()});
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch { return null; }
 }
 
 async function apiSaveIncome(dateStr, amount, note) {
-  if (tg?.initData) {
-    try {
-      const resp = await fetch(`${API_BASE}/income`, {
-        method: 'POST',
-        headers: apiHeaders(),
-        body: JSON.stringify({date: dateStr, amount, note: note || ''})
-      });
-      if (resp.ok) return true;
-    } catch {}
-  }
-  if (tg?.sendData) {
-    tg.sendData(JSON.stringify({action: 'save_income', date: dateStr, amount, note: note || ''}));
-    return true;
-  }
-  return false;
+  try {
+    const resp = await fetch(`${API_BASE}/income`, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({date: dateStr, amount, note: note || ''})
+    });
+    return resp.ok;
+  } catch { return false; }
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
