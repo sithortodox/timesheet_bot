@@ -75,6 +75,7 @@ class WebAppAPI:
                 user = validated.get("user")
                 if user:
                     return user.get("id")
+            logger.info(f"init_data validation failed for user_id header check")
         uid_header = request.headers.get("X-Telegram-User-Id") or request.query.get("user_id")
         if uid_header:
             try:

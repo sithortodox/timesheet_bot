@@ -779,18 +779,32 @@ const DAYS_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 // ── API ─────────────────────────────────────────────────────────────────────
 const API_BASE = window.location.origin + '/api';
 
-function apiHeaders() {
-  const h = {'Content-Type': 'application/json'};
-  if (tg?.initData) h['X-Telegram-Init-Data'] = tg.initData;
-  if (tg?.initDataUnsafe?.user?.id) h['X-Telegram-User-Id'] = String(tg.initDataUnsafe.user.id);
-  return h;
+function getTelegramUserId() {
+  if (tg?.initDataUnsafe?.user?.id) return tg.initDataUnsafe.user.id;
+  if (tg?.initData) {
+    try {
+      const params = new URLSearchParams(tg.initData);
+      const userJson = params.get('user');
+      if (userJson) return JSON.parse(userJson).id;
+    } catch {}
+  }
+  return null;
 }
 
 function apiAuthQuery() {
   const params = new URLSearchParams();
   if (tg?.initData) params.set('init_data', tg.initData);
-  if (tg?.initDataUnsafe?.user?.id) params.set('user_id', String(tg.initDataUnsafe.user.id));
+  const uid = getTelegramUserId();
+  if (uid) params.set('user_id', String(uid));
   return params.toString();
+}
+
+function apiHeaders() {
+  const h = {'Content-Type': 'application/json'};
+  if (tg?.initData) h['X-Telegram-Init-Data'] = tg.initData;
+  const uid = getTelegramUserId();
+  if (uid) h['X-Telegram-User-Id'] = String(uid);
+  return h;
 }
 
 async function apiGetEntries() {
