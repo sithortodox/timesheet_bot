@@ -819,34 +819,55 @@ async function apiDeleteEntry(dateStr) {
 }
 
 async function apiGetIncome() {
-  if (!tg?.initData) return [];
-  try {
-    const resp = await fetch(`${API_BASE}/income`, {headers: apiHeaders()});
-    if (!resp.ok) return [];
-    return await resp.json();
-  } catch { return []; }
+  if (tg?.initData) {
+    try {
+      const resp = await fetch(`${API_BASE}/income`, {headers: apiHeaders()});
+      if (resp.ok) return await resp.json();
+    } catch {}
+  }
+  return null;
 }
 
 async function apiSaveIncome(dateStr, amount, note) {
-  if (!tg?.initData) return false;
-  try {
-    const resp = await fetch(`${API_BASE}/income`, {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({date: dateStr, amount, note: note || ''})
-    });
-    return resp.ok;
-  } catch { return false; }
+  if (tg?.initData) {
+    try {
+      const resp = await fetch(`${API_BASE}/income`, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({date: dateStr, amount, note: note || ''})
+      });
+      if (resp.ok) return true;
+    } catch {}
+  }
+  if (tg?.sendData) {
+    tg.sendData(JSON.stringify({action: 'save_income', date: dateStr, amount, note: note || ''}));
+    return true;
+  }
+  return false;
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'timesheet_v2_' + (tg?.initDataUnsafe?.user?.id || 'local');
+const INCOME_KEY = 'timesheet_income_' + (tg?.initDataUnsafe?.user?.id || 'local');
 
 function loadEntriesLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     entries = raw ? JSON.parse(raw) : {};
   } catch { entries = {}; }
+}
+
+function loadIncomeLocal() {
+  try {
+    const raw = localStorage.getItem(INCOME_KEY);
+    incomeList = raw ? JSON.parse(raw) : [];
+  } catch { incomeList = []; }
+}
+
+function saveIncomeLocal() {
+  try {
+    localStorage.setItem(INCOME_KEY, JSON.stringify(incomeList));
+  } catch {}
 }
 
 function saveEntriesLocal() {
@@ -863,7 +884,13 @@ async function loadEntries() {
   } else {
     loadEntriesLocal();
   }
-  incomeList = await apiGetIncome();
+  const apiIncome = await apiGetIncome();
+  if (apiIncome && apiIncome.length > 0) {
+    incomeList = apiIncome;
+    saveIncomeLocal();
+  } else {
+    loadIncomeLocal();
+  }
 }
 
 async function saveEntry(dateStr, hours, note, project, startTime, endTime, payment) {
@@ -1162,8 +1189,13 @@ function openEntry(dateStr) {
     const salary = parseFloat(document.getElementById('salaryInput').value) || 0;
     await saveEntry(dateStr, hours, note, project, startTime, endTime, payment);
     if (salary > 0) {
-      await apiSaveIncome(dateStr, salary, '');
-      incomeList = await apiGetIncome();
+      const res = await apiSaveIncome(dateStr, salary, '');
+      incomeList.push({date: dateStr, amount: salary, note: ''});
+      saveIncomeLocal();
+      if (res) {
+        incomeList = await apiGetIncome();
+        if (incomeList && incomeList.length > 0) saveIncomeLocal();
+      }
     }
     form.innerHTML = '';
     selectedDate = null;

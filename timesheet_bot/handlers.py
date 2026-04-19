@@ -428,6 +428,14 @@ class Handlers:
                 await update.message.reply_text(
                     f"✅ Сохранено из табеля!\n📅 {date_str} — {hours:.1f}ч{shift}{proj}",
                 )
+            elif action == "save_income":
+                date_str = payload["date"]
+                amount = float(payload["amount"])
+                note = payload.get("note", "")
+                self.storage.save_income(user_id, date_str, amount, note)
+                await update.message.reply_text(
+                    f"✅ Зарплата записана из табеля!\n📅 {date_str} — {format_money(amount)}",
+                )
             elif action == "get_data":
                 entries = self.storage.get_entries(user_id)
                 await update.message.reply_text(
