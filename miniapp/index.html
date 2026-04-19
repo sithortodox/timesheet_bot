@@ -1163,6 +1163,7 @@ function openEntry(dateStr) {
     await saveEntry(dateStr, hours, note, project, startTime, endTime, payment);
     if (salary > 0) {
       await apiSaveIncome(dateStr, salary, '');
+      incomeList = await apiGetIncome();
     }
     form.innerHTML = '';
     selectedDate = null;

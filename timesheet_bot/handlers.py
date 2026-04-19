@@ -92,8 +92,11 @@ class Handlers:
         user_id = update.effective_user.id
         now = datetime.now()
         stats_data = self.storage.get_month_stats(user_id, now.year, now.month)
+        month_prefix = f"{now.year:04d}-{now.month:02d}"
+        month_salary = self.storage.get_income_total(user_id, date_from=f"{month_prefix}-01")
+        total_payment = sum(e.get("payment", 0) or 0 for e in stats_data["entries"])
 
-        if not stats_data["entries"]:
+        if not stats_data["entries"] and month_salary == 0:
             await update.message.reply_text("📊 В этом месяце записей пока нет.")
             return
 
@@ -104,16 +107,31 @@ class Handlers:
             stats_data["avg_hours"],
         )
 
+        if total_payment > 0 or month_salary > 0:
+            lines.append(f"💵 За смены: *{format_money(total_payment)}*")
+            if month_salary > 0:
+                lines.append(f"💼 Зарплата: *{format_money(month_salary)}*")
+            lines.append(f"💰 Итого: *{format_money(total_payment + month_salary)}*\n")
+
         project_stats = self.storage.get_project_stats(user_id, now.year, now.month)
         if project_stats:
             lines.append("*По проектам:*")
             for ps in project_stats:
-                lines.append(f"  🏷 #{ps['project']}: {ps['total_hours']:.1f}ч ({ps['days']} дн.)")
+                pay = format_money(ps.get("total_payment", 0)) if ps.get("total_payment", 0) > 0 else ""
+                lines.append(f"  🏷 #{ps['project']}: {ps['total_hours']:.1f}ч ({ps['days']} дн.) {pay}")
             lines.append("")
 
         lines.append("*Последние записи:*")
         for entry in stats_data["entries"][-5:]:
             lines.append(format_entry_line(entry))
+
+        if month_salary > 0:
+            income_items = self.storage.get_income(user_id, date_from=f"{month_prefix}-01")
+            if income_items:
+                lines.append("\n*Зарплата:*")
+                for item in income_items:
+                    note = f" — _{item['note']}_" if item.get("note") else ""
+                    lines.append(f"  💼 {item['date']}: {format_money(item['amount'])}{note}")
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
