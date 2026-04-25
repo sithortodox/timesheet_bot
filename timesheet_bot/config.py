@@ -9,6 +9,8 @@ class Config:
     db_path: str
     reminder_check_interval: int = 60
     super_admin_id: int = 0
+    webhook_url: str = ""
+    webhook_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -23,4 +25,6 @@ class Config:
             db_path=os.getenv("DB_PATH", "timesheet.db"),
             reminder_check_interval=int(os.getenv("REMINDER_CHECK_INTERVAL", "60")),
             super_admin_id=int(os.getenv("SUPER_ADMIN_ID", "0")),
+            webhook_url=os.getenv("WEBHOOK_URL", ""),
+            webhook_secret=os.getenv("WEBHOOK_SECRET", ""),
         )

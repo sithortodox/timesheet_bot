@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Табель</title>
+<meta name="theme-color" content="#5b8def">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -60,6 +66,22 @@
     letter-spacing: 0.05em;
     text-transform: uppercase;
   }
+
+  .theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .theme-toggle:active { transform: scale(0.92); }
 
   .month-total {
     text-align: right;
@@ -733,6 +755,7 @@
 <div class="header">
   <div class="header-top">
     <div class="brand">⏱ Табель</div>
+    <button class="theme-toggle" id="themeToggle" title="Сменить тему">🌙</button>
     <div class="month-total">
       <div class="hours" id="monthTotal">0</div>
       <div class="label">часов в месяце</div>
@@ -1650,7 +1673,21 @@ async function init() {
   updateTodayBar();
   renderAll();
 
-  if (tg?.colorScheme === 'light') {
+  applyTheme(localStorage.getItem('theme') || (tg?.colorScheme === 'light' ? 'light' : 'dark'));
+
+  document.getElementById('themeToggle').onclick = () => {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    localStorage.setItem('theme', next);
+  };
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (theme === 'light') {
     document.documentElement.style.setProperty('--bg', '#f3f4f6');
     document.documentElement.style.setProperty('--surface', '#ffffff');
     document.documentElement.style.setProperty('--surface2', '#e5e7eb');
@@ -1658,8 +1695,20 @@ async function init() {
     document.documentElement.style.setProperty('--text', '#1f2937');
     document.documentElement.style.setProperty('--text-muted', '#6b7280');
     document.documentElement.style.setProperty('--text-dim', '#374151');
+    if (tg) tg.setHeaderColor('#f3f4f6');
+  } else {
+    document.documentElement.style.setProperty('--bg', '#0f1117');
+    document.documentElement.style.setProperty('--surface', '#181b24');
+    document.documentElement.style.setProperty('--surface2', '#222632');
+    document.documentElement.style.setProperty('--border', '#2d3142');
+    document.documentElement.style.setProperty('--text', '#e4e7ed');
+    document.documentElement.style.setProperty('--text-muted', '#6b7280');
+    document.documentElement.style.setProperty('--text-dim', '#9ca3af');
+    if (tg) tg.setHeaderColor('#0f1117');
   }
 }
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 
 init();
 </script>

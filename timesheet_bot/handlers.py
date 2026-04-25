@@ -72,6 +72,7 @@ class Handlers:
             "• `09:00 18:00 $5000 #backend API-ревью` — оплата + проект + заметка\n"
             "• `09:00 18:00 2025-04-10` — за конкретную дату\n"
             "• `09:00 18:00 2025-04-10 #design Прототип` — всё вместе\n\n"
+            "🎤 *Голосовой ввод:* отправь голосовое — скажи «девять восемнадцать цех1»\n\n"
             "💼 */salary 50000* — записать получение зарплаты\n"
             "💼 */salary 30000 2026-04-15 Аванс* — за дату с заметкой\n"
             "🛌 */dayoff* — отметить сегодня как выходной\n"
@@ -425,6 +426,24 @@ class Handlers:
             proj = data.split(":", 1)[1]
             return await self._handle_project_stats(query, user_id, proj)
 
+        if data.startswith("yesterday:"):
+            parts = data.split(":")
+            if len(parts) == 4 and parts[1] == "dayoff":
+                date_str = parts[2]
+                self.storage.save_entry(user_id, date_str, 0, "", "", "", "", 0, day_type="dayoff")
+                await query.edit_message_text(f"🛌 Выходной за *{date_str}* отмечен!", parse_mode="Markdown")
+            elif len(parts) == 5:
+                start_time = parts[1]
+                end_time = parts[2]
+                date_str = parts[3]
+                hours = parse_shift_time(start_time, end_time)
+                if hours:
+                    self.storage.save_entry(user_id, date_str, hours, "", "", start_time, end_time, 0, "work")
+                    await query.edit_message_text(f"✅ Записано за *{date_str}*: {start_time}-{end_time} → *{hours:.1f}ч*", parse_mode="Markdown")
+                else:
+                    await query.edit_message_text("❌ Неверное время")
+            return
+
     async def handle_web_app_data(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -502,6 +521,71 @@ class Handlers:
         except Exception as e:
             logger.error(f"Photo handler error: {e}")
             await update.message.reply_text("❌ Ошибка сохранения фото.")
+
+    async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        try:
+            voice = update.message.voice
+            file = await voice.get_file()
+
+            import os
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            await file.download_to_drive(tmp_path)
+
+            import speech_recognition as sr
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(tmp_path) as source:
+                audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language="ru-RU")
+
+            os.unlink(tmp_path)
+
+            logger.info(f"Voice from {user_id}: {text}")
+            parts = text.split()
+            start_time = ""
+            end_time = ""
+            hours = None
+            if len(parts) >= 2:
+                hours = parse_shift_time(parts[0], parts[1])
+                if hours:
+                    start_time = parts[0]
+                    end_time = parts[1]
+
+            if hours is None:
+                await update.message.reply_text(
+                    f"🎤 Распознано: _{text}_\n\n"
+                    "Не удалось определить смену. Скажи например: «девять восемнадцать»",
+                    parse_mode="Markdown",
+                )
+                return
+
+            date_str = date_type.today().isoformat()
+            project = ""
+            note = ""
+            if len(parts) > 2:
+                rest = " ".join(parts[2:])
+                project, note = parse_project(rest)
+
+            self.storage.save_entry(user_id, date_str, hours, note, project, start_time, end_time, 0, "work")
+            proj_text = f"\n🏷 Проект: _#{project}_" if project else ""
+            note_text = f"\n📝 Заметка: _{note}_" if note else ""
+            await update.message.reply_text(
+                f"✅ Записано из голосового!\n"
+                f"📅 Дата: *{date_str}*\n"
+                f"⏱ Смена: *{start_time}-{end_time}* → *{hours:.1f}ч*{proj_text}{note_text}",
+                parse_mode="Markdown",
+            )
+        except sr.UnknownValueError:
+            await update.message.reply_text("🎤 Не удалось распознать речь. Попробуй ещё раз.")
+        except sr.RequestError as e:
+            logger.error(f"Speech API error: {e}")
+            await update.message.reply_text("❌ Сервис распознавания недоступен. Попробуй позже.")
+        except Exception as e:
+            logger.error(f"Voice handler error: {e}")
+            await update.message.reply_text("❌ Ошибка обработки голосового сообщения.")
 
     async def handle_inline(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.inline_query
